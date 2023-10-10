@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
+using System.Drawing;
 using System.IO;
 using System.Linq;
 
@@ -11,14 +13,13 @@ namespace SimpleFileNameRenumberer.CUI
         private readonly static string _thisProgramName;
 
         static Program()
-        {
-            _thisProgramName = Path.GetFileNameWithoutExtension(typeof(Program).Assembly.Location);
-        }
+            => _thisProgramName = Path.GetFileNameWithoutExtension(typeof(Program).Assembly.Location);
 
         private static int Main(string[] args)
         {
             var prefix = (string?)null;
             var extensions = new List<string>();
+            var onlyImageFile = false;
             var targetFiles = new List<FileInfo>();
             for (var index = 0; index < args.Length; ++index)
             {
@@ -56,6 +57,10 @@ namespace SimpleFileNameRenumberer.CUI
                     }
 
                     ++index;
+                }
+                else if (arg == "-only_image_file")
+                {
+                    onlyImageFile = true;
                 }
                 else if (arg.StartsWith("-", StringComparison.Ordinal))
                 {
@@ -97,103 +102,108 @@ namespace SimpleFileNameRenumberer.CUI
                     .ToList();
             }
 
-            if (targetFiles.Count > 0)
+            try
             {
-                InitializeProgress(targetFiles.Count);
-                AddProgress(0);
-
-                var targetDirectoryInfos =
-                    targetFiles
-                    .Select(file => new { dir = file.DirectoryName ?? ".", name = file.Name, ext = file.Extension.ToUpperInvariant() })
-                    .GroupBy(item => item.dir)
-                    .Select(g => new { dir = g.Key, fileNames = g.Select(item => item.name).ToList() })
-                    .ToList();
-
-                foreach (var targetDirectoryInfo in targetDirectoryInfos)
+                if (targetFiles.Count > 0)
                 {
-                    try
+                    InitializeProgress(targetFiles.Count * (onlyImageFile ? 2 : 1));
+                    AddProgress(0);
+
+                    var targetDirectoryInfos =
+                        targetFiles
+                        .Select(imageFile =>
+                        {
+                            var fileInfo = new
+                            {
+                                dir = imageFile.Directory ?? throw new Exception($"不正なファイル名です。: \"{imageFile.FullName}\""),
+                                imageFile,
+                                ext = imageFile.Extension.ToUpperInvariant(),
+                                isWide = onlyImageFile ? IsWideImage(imageFile) : false,
+                            };
+
+                            if (onlyImageFile)
+                                AddProgress(1);
+                            return fileInfo;
+                        })
+                        .GroupBy(item => item.dir.FullName)
+                        .Select(g => new
+                        {
+                            g.First().dir,
+                            fileInfos = g.Select(item => new { item.imageFile, item.isWide }).ToList(),
+                        })
+                        .ToList();
+
+                    foreach (var targetDirectoryInfo in targetDirectoryInfos)
                     {
-                        var enabledDirectory = true;
-                        var dir = targetDirectoryInfo.dir;
-                        while (dir is not null)
+                        try
                         {
-                            if (Path.GetFileName(dir).StartsWith('.'))
+                            if (IsEnableImageDirectory(targetDirectoryInfo.dir))
                             {
-                                enabledDirectory = false;
-                                break;
-                            }
-
-                            dir = Path.GetDirectoryName(dir);
-                        }
-
-                        if (enabledDirectory)
-                        {
-                            if (targetDirectoryInfo.fileNames.Count < 2)
-                            {
-                                PrintWarningMessage($"ディレクトリ配下にファイルが1つしかないため変名を行いません。: \"{targetDirectoryInfo.dir}\"");
-                            }
-                            else
-                            {
-                                var fileNames = targetDirectoryInfo.fileNames.ToArray();
-                                var success = true;
-                                for (var index1 = 0; index1 < fileNames.Length - 1; ++index1)
+                                if (targetDirectoryInfo.fileInfos.Count < 2)
                                 {
-                                    var fileName1 = fileNames[index1];
-                                    for (var index2 = index1 + 1; index2 < fileNames.Length; ++index2)
-                                    {
-                                        var fileName2 = fileNames[index2];
-                                        success = success && CheckFileNameAmbiguity(targetDirectoryInfo.dir, fileName1, fileName2);
-                                        if (!success)
-                                            break;
-                                    }
+                                    PrintWarningMessage($"ディレクトリ配下にファイルが1つしかないため変名を行いません。: \"{targetDirectoryInfo.dir}\"");
                                 }
-
-                                if (success)
+                                else
                                 {
-                                    var temporaryPrefix = "";
-                                    for (var index = 0; ; ++index)
+                                    if (ExistDuplicateFileNames(targetDirectoryInfo.dir, targetDirectoryInfo.fileInfos.Select(fileInfo => fileInfo.imageFile.Name)))
                                     {
-                                        temporaryPrefix = $"._{index}_";
-                                        if (!Directory.EnumerateFiles(targetDirectoryInfo.dir, temporaryPrefix + "*", SearchOption.TopDirectoryOnly).Any())
-                                            break;
-                                    }
+                                        var temporaryPrefix = GetTemporaryFilePrefix(targetDirectoryInfo.dir);
+                                        var totalPageCount = targetDirectoryInfo.fileInfos.Sum(item => item.isWide ? 2 : 1);
+                                        var numberWidth = totalPageCount.ToString().Length;
+                                        var numberFormat = $"D{numberWidth}";
+                                        var pageCount = 1;
 
-                                    var numberWidth = targetDirectoryInfo.fileNames.Count.ToString().Length;
-                                    var numberFormat = $"D{numberWidth}";
+                                        var fileNameMaps =
+                                            targetDirectoryInfo.fileInfos
+                                            .OrderBy(fileInfo => fileInfo.imageFile.Name, StringComparer.OrdinalIgnoreCase)
+                                            .Select((fileInfo, index) =>
+                                            {
+                                                var isFirstPage = pageCount == 1;
+                                                var destinationPageNumber = fileInfo.isWide ? $"{pageCount.ToString(numberFormat)}-{(pageCount + 1).ToString(numberFormat)}" : pageCount.ToString(numberFormat);
+                                                pageCount += !isFirstPage && fileInfo.isWide ? 2 : 1;
+                                                var extension = fileInfo.imageFile.Extension;
+                                                var destinationFileName = Path.Combine(targetDirectoryInfo.dir.FullName, $"{prefix ?? ""}{destinationPageNumber}{extension}");
 
-                                    var fileNameMaps =
-                                        targetDirectoryInfo.fileNames
-                                        .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
-                                        .Select((name, index) => new
+                                                if (!isFirstPage && (pageCount & 1) != 0 && fileInfo.isWide)
+                                                    PrintWarningMessage($"見開きページが偶数ページ番号ではありません。: page=\"{destinationPageNumber}\", file=\"{destinationFileName}\"");
+
+                                                return new
+                                                {
+                                                    sourceFileName = fileInfo.imageFile,
+                                                    temporaryFileName = Path.Combine(targetDirectoryInfo.dir.FullName, $"{temporaryPrefix}{destinationPageNumber}{extension}"),
+                                                    destinationFileName,
+                                                };
+                                            })
+                                            .ToList();
+
+                                        foreach (var fileNameMap in fileNameMaps)
                                         {
-                                            sourceFileName = Path.Combine(targetDirectoryInfo.dir, name),
-                                            temporaryFileName = Path.Combine(targetDirectoryInfo.dir, $"{temporaryPrefix}{index + 1}{Path.GetExtension(name)}"),
-                                            destinationFileName = Path.Combine(targetDirectoryInfo.dir, $"{prefix ?? ""}{(index + 1).ToString(numberFormat)}{Path.GetExtension(name)}"),
-                                        })
-                                        .ToList();
+                                            if (!string.Equals(fileNameMap.sourceFileName.FullName, fileNameMap.destinationFileName, StringComparison.OrdinalIgnoreCase))
+                                                File.Move(fileNameMap.sourceFileName.FullName, fileNameMap.temporaryFileName);
+                                        }
 
-                                    foreach (var fileNameMap in fileNameMaps)
-                                    {
-                                        if (!string.Equals(fileNameMap.sourceFileName, fileNameMap.destinationFileName, StringComparison.OrdinalIgnoreCase))
-                                            File.Move(fileNameMap.sourceFileName, fileNameMap.temporaryFileName);
-                                    }
-
-                                    foreach (var fileNameMap in fileNameMaps)
-                                    {
-                                        if (!string.Equals(fileNameMap.sourceFileName, fileNameMap.destinationFileName, StringComparison.OrdinalIgnoreCase))
-                                            File.Move(fileNameMap.temporaryFileName, fileNameMap.destinationFileName);
+                                        foreach (var fileNameMap in fileNameMaps)
+                                        {
+                                            if (!string.Equals(fileNameMap.sourceFileName.FullName, fileNameMap.destinationFileName, StringComparison.OrdinalIgnoreCase))
+                                                File.Move(fileNameMap.temporaryFileName, fileNameMap.destinationFileName);
+                                        }
                                     }
                                 }
                             }
                         }
+                        finally
+                        {
+                            AddProgress(targetDirectoryInfo.fileInfos.Count);
+                        }
                     }
-                    finally
-                    {
-                        AddProgress(targetDirectoryInfo.fileNames.Count);
-                    }
-                }
 
-                Console.WriteLine();
+                    Console.WriteLine();
+                }
+            }
+            catch (Exception ex)
+            {
+                PrintErrorMessage(ex.Message);
+                return 1;
             }
 
             Console.WriteLine();
@@ -202,6 +212,65 @@ namespace SimpleFileNameRenumberer.CUI
             _ = Console.ReadLine();
 
             return 0;
+        }
+
+        private static bool IsEnableImageDirectory(DirectoryInfo? dir)
+        {
+            while (dir is not null)
+            {
+                if (dir.Name.StartsWith('.'))
+                {
+                    return false;
+                }
+
+                dir = dir.Parent;
+            }
+
+            return true;
+        }
+
+        [SuppressMessage("Interoperability", "CA1416:プラットフォームの互換性を検証", Justification = "<保留中>")]
+        private static bool IsWideImage(FileInfo imageFile)
+        {
+            try
+            {
+                using var image = new Bitmap(imageFile.FullName);
+                return image.Width > image.Height;
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"画像ではないファイルが含まれています。: \"{imageFile.FullName}\"", ex);
+            }
+        }
+
+        private static bool ExistDuplicateFileNames(DirectoryInfo? baseDirectory, IEnumerable<string> fileNames)
+        {
+            var fileNamesArray = fileNames.ToArray();
+            for (var index1 = 0; index1 < fileNamesArray.Length - 1; ++index1)
+            {
+                var fileName1 = fileNamesArray[index1];
+                for (var index2 = index1 + 1; index2 < fileNamesArray.Length; ++index2)
+                {
+                    var fileName2 = fileNamesArray[index2];
+                    if (!CheckFileNameAmbiguity(baseDirectory is null ? "" : baseDirectory.FullName, fileName1, fileName2))
+                        return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static string GetTemporaryFilePrefix(DirectoryInfo baseDirectory)
+        {
+            string temporaryPrefix;
+            for (var index = 0; ; ++index)
+            {
+                temporaryPrefix = $"._{index}_";
+                if (!baseDirectory.EnumerateFiles(temporaryPrefix + "*", SearchOption.TopDirectoryOnly).Any())
+                    break;
+            }
+
+            return temporaryPrefix;
         }
 
         private static bool CheckFileNameAmbiguity(string dir, string fileName1, string fileName2)
