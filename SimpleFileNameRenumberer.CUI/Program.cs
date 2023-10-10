@@ -159,12 +159,13 @@ namespace SimpleFileNameRenumberer.CUI
                                             .Select((fileInfo, index) =>
                                             {
                                                 var isFirstPage = pageCount == 1;
-                                                var destinationPageNumber = fileInfo.isWide ? $"{pageCount.ToString(numberFormat)}-{(pageCount + 1).ToString(numberFormat)}" : pageCount.ToString(numberFormat);
-                                                pageCount += !isFirstPage && fileInfo.isWide ? 2 : 1;
+                                                var isWidePage = !isFirstPage && fileInfo.isWide;
+                                                var destinationPageNumber = isWidePage ? $"{pageCount.ToString(numberFormat)}-{(pageCount + 1).ToString(numberFormat)}" : pageCount.ToString(numberFormat);
+                                                pageCount += isWidePage ? 2 : 1;
                                                 var extension = fileInfo.imageFile.Extension;
                                                 var destinationFileName = Path.Combine(targetDirectoryInfo.dir.FullName, $"{prefix ?? ""}{destinationPageNumber}{extension}");
 
-                                                if (!isFirstPage && (pageCount & 1) != 0 && fileInfo.isWide)
+                                                if ((pageCount & 1) != 0 && isWidePage)
                                                     PrintWarningMessage($"見開きページが偶数ページ番号ではありません。: page=\"{destinationPageNumber}\", file=\"{destinationFileName}\"");
 
                                                 return new
