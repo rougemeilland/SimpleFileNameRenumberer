@@ -4,6 +4,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 
 namespace SimpleFileNameRenumberer.CUI
 {
@@ -106,7 +107,7 @@ namespace SimpleFileNameRenumberer.CUI
             {
                 if (targetFiles.Count > 0)
                 {
-                    InitializeProgress(targetFiles.Count * (onlyImageFile ? 2 : 1));
+                    InitializeProgress(targetFiles.Count * 2);
                     AddProgress(0);
 
                     var targetDirectoryInfos =
@@ -118,18 +119,15 @@ namespace SimpleFileNameRenumberer.CUI
                                 dir = imageFile.Directory ?? throw new Exception($"不正なファイル名です。: \"{imageFile.FullName}\""),
                                 imageFile,
                                 ext = imageFile.Extension.ToUpperInvariant(),
-                                isWide = onlyImageFile ? IsWideImage(imageFile) : false,
                             };
 
-                            if (onlyImageFile)
-                                AddProgress(1);
                             return fileInfo;
                         })
                         .GroupBy(item => item.dir.FullName)
                         .Select(g => new
                         {
                             g.First().dir,
-                            fileInfos = g.Select(item => new { item.imageFile, item.isWide }).ToList(),
+                            imageFiles = g.Select(item => item.imageFile).ToList(),
                         })
                         .ToList();
 
@@ -139,39 +137,53 @@ namespace SimpleFileNameRenumberer.CUI
                         {
                             if (IsEnableImageDirectory(targetDirectoryInfo.dir))
                             {
-                                if (targetDirectoryInfo.fileInfos.Count < 2)
+                                if (targetDirectoryInfo.imageFiles.Count < 2)
                                 {
                                     PrintWarningMessage($"ディレクトリ配下にファイルが1つしかないため変名を行いません。: \"{targetDirectoryInfo.dir}\"");
                                 }
                                 else
                                 {
-                                    if (ExistDuplicateFileNames(targetDirectoryInfo.dir, targetDirectoryInfo.fileInfos.Select(fileInfo => fileInfo.imageFile.Name)))
+                                    var imageFileDirectory = targetDirectoryInfo.dir;
+                                    if (ExistDuplicateFileNames(imageFileDirectory, targetDirectoryInfo.imageFiles.Select(imageFile => imageFile.Name)))
                                     {
-                                        var temporaryPrefix = GetTemporaryFilePrefix(targetDirectoryInfo.dir);
-                                        var totalPageCount = targetDirectoryInfo.fileInfos.Sum(item => item.isWide ? 2 : 1);
+                                        var fileInfos =
+                                            targetDirectoryInfo.imageFiles
+                                            .Select(imageFileInfo =>
+                                            {
+                                                var value = new
+                                                {
+                                                    imageFileInfo,
+                                                    isWideImage = onlyImageFile ? IsWideImage(imageFileInfo) : false,
+                                                };
+                                                AddProgress(1);
+                                                return value;
+                                            })
+                                            .ToList();
+                                        var temporaryPrefix = GetTemporaryFilePrefix(imageFileDirectory);
+                                        var totalPageCount = fileInfos.Sum(item => item.isWideImage ? 2 : 1);
                                         var numberWidth = totalPageCount.ToString().Length;
                                         var numberFormat = $"D{numberWidth}";
                                         var pageCount = 1;
 
                                         var fileNameMaps =
-                                            targetDirectoryInfo.fileInfos
-                                            .OrderBy(fileInfo => fileInfo.imageFile.Name, StringComparer.OrdinalIgnoreCase)
+                                            fileInfos
+                                            .OrderBy(fileInfo => fileInfo.imageFileInfo.Name, StringComparer.OrdinalIgnoreCase)
                                             .Select((fileInfo, index) =>
                                             {
                                                 var isFirstPage = pageCount == 1;
-                                                var isWidePage = !isFirstPage && fileInfo.isWide;
-                                                var destinationPageNumber = isWidePage ? $"{pageCount.ToString(numberFormat)}-{(pageCount + 1).ToString(numberFormat)}" : pageCount.ToString(numberFormat);
-                                                pageCount += isWidePage ? 2 : 1;
-                                                var extension = fileInfo.imageFile.Extension;
-                                                var destinationFileName = Path.Combine(targetDirectoryInfo.dir.FullName, $"{prefix ?? ""}{destinationPageNumber}{extension}");
+                                                var isWideImage = !isFirstPage && fileInfo.isWideImage;
+                                                var destinationPageNumber = isWideImage ? $"{pageCount.ToString(numberFormat)}-{(pageCount + 1).ToString(numberFormat)}" : pageCount.ToString(numberFormat);
+                                                pageCount += isWideImage ? 2 : 1;
+                                                var extension = fileInfo.imageFileInfo.Extension;
+                                                var destinationFileName = Path.Combine(imageFileDirectory.FullName, $"{prefix ?? ""}{destinationPageNumber}{extension}");
 
-                                                if ((pageCount & 1) != 0 && isWidePage)
+                                                if ((pageCount & 1) != 0 && isWideImage)
                                                     PrintWarningMessage($"見開きページが偶数ページ番号ではありません。: page=\"{destinationPageNumber}\", file=\"{destinationFileName}\"");
 
                                                 return new
                                                 {
-                                                    sourceFileName = fileInfo.imageFile,
-                                                    temporaryFileName = Path.Combine(targetDirectoryInfo.dir.FullName, $"{temporaryPrefix}{destinationPageNumber}{extension}"),
+                                                    sourceFile = fileInfo.imageFileInfo,
+                                                    temporaryFileName = Path.Combine(imageFileDirectory.FullName, $"{temporaryPrefix}{destinationPageNumber}{extension}"),
                                                     destinationFileName,
                                                 };
                                             })
@@ -179,13 +191,13 @@ namespace SimpleFileNameRenumberer.CUI
 
                                         foreach (var fileNameMap in fileNameMaps)
                                         {
-                                            if (!string.Equals(fileNameMap.sourceFileName.FullName, fileNameMap.destinationFileName, StringComparison.OrdinalIgnoreCase))
-                                                File.Move(fileNameMap.sourceFileName.FullName, fileNameMap.temporaryFileName);
+                                            if (!string.Equals(fileNameMap.sourceFile.FullName, fileNameMap.destinationFileName, StringComparison.OrdinalIgnoreCase))
+                                                File.Move(fileNameMap.sourceFile.FullName, fileNameMap.temporaryFileName);
                                         }
 
                                         foreach (var fileNameMap in fileNameMaps)
                                         {
-                                            if (!string.Equals(fileNameMap.sourceFileName.FullName, fileNameMap.destinationFileName, StringComparison.OrdinalIgnoreCase))
+                                            if (!string.Equals(fileNameMap.sourceFile.FullName, fileNameMap.destinationFileName, StringComparison.OrdinalIgnoreCase))
                                                 File.Move(fileNameMap.temporaryFileName, fileNameMap.destinationFileName);
                                         }
                                     }
@@ -194,7 +206,7 @@ namespace SimpleFileNameRenumberer.CUI
                         }
                         finally
                         {
-                            AddProgress(targetDirectoryInfo.fileInfos.Count);
+                            AddProgress(targetDirectoryInfo.imageFiles.Count);
                         }
                     }
 
