@@ -4,7 +4,6 @@ using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
 using System.IO;
 using System.Linq;
-using System.Reflection;
 
 namespace SimpleFileNameRenumberer.CUI
 {
@@ -103,6 +102,11 @@ namespace SimpleFileNameRenumberer.CUI
                     .ToList();
             }
 
+            targetFiles =
+                targetFiles
+                .Where(file => IsEnableImageDirectory(file.Directory))
+                .ToList();
+
             try
             {
                 if (targetFiles.Count > 0)
@@ -135,71 +139,69 @@ namespace SimpleFileNameRenumberer.CUI
                     {
                         try
                         {
-                            if (IsEnableImageDirectory(targetDirectoryInfo.dir))
+                            if (targetDirectoryInfo.imageFiles.Count < 2)
                             {
-                                if (targetDirectoryInfo.imageFiles.Count < 2)
+                                PrintWarningMessage($"ディレクトリ配下にファイルが1つしかないため変名を行いません。: \"{targetDirectoryInfo.dir}\"");
+                                AddProgress(targetDirectoryInfo.imageFiles.Count);
+                            }
+                            else
+                            {
+                                var imageFileDirectory = targetDirectoryInfo.dir;
+                                if (ExistDuplicateFileNames(imageFileDirectory, targetDirectoryInfo.imageFiles.Select(imageFile => imageFile.Name)))
                                 {
-                                    PrintWarningMessage($"ディレクトリ配下にファイルが1つしかないため変名を行いません。: \"{targetDirectoryInfo.dir}\"");
-                                }
-                                else
-                                {
-                                    var imageFileDirectory = targetDirectoryInfo.dir;
-                                    if (ExistDuplicateFileNames(imageFileDirectory, targetDirectoryInfo.imageFiles.Select(imageFile => imageFile.Name)))
+                                    var fileInfos =
+                                        targetDirectoryInfo.imageFiles
+                                        .Select(imageFileInfo =>
+                                        {
+                                            var value = new
+                                            {
+                                                imageFileInfo,
+                                                isWideImage = onlyImageFile ? IsWideImage(imageFileInfo) : false,
+                                            };
+                                            AddProgress(1);
+                                            return value;
+                                        })
+                                        .ToList();
+                                    var temporaryPrefix = GetTemporaryFilePrefix(imageFileDirectory);
+                                    var totalPageCount = fileInfos.Sum(item => item.isWideImage ? 2 : 1);
+                                    var numberWidth = totalPageCount.ToString().Length;
+                                    var numberFormat = $"D{numberWidth}";
+                                    var pageCount = 1;
+
+                                    var fileNameMaps =
+                                        fileInfos
+                                        .OrderBy(fileInfo => fileInfo.imageFileInfo.Name, StringComparer.OrdinalIgnoreCase)
+                                        .Select((fileInfo, index) =>
+                                        {
+                                            var isFirstPage = pageCount == 1;
+                                            var isWideImage = !isFirstPage && fileInfo.isWideImage;
+                                            var destinationPageNumber = isWideImage ? $"{pageCount.ToString(numberFormat)}-{(pageCount + 1).ToString(numberFormat)}" : pageCount.ToString(numberFormat);
+                                            pageCount += isWideImage ? 2 : 1;
+                                            var extension = fileInfo.imageFileInfo.Extension;
+                                            var destinationFileName = Path.Combine(imageFileDirectory.FullName, $"{prefix ?? ""}{destinationPageNumber}{extension}");
+
+                                            if ((pageCount & 1) != 0 && isWideImage)
+                                                PrintWarningMessage($"見開きページが偶数ページ番号ではありません。: page=\"{destinationPageNumber}\", file=\"{destinationFileName}\"");
+
+                                            return new
+                                            {
+                                                sourceFile = fileInfo.imageFileInfo,
+                                                temporaryFileName = Path.Combine(imageFileDirectory.FullName, $"{temporaryPrefix}{destinationPageNumber}{extension}"),
+                                                destinationFileName,
+                                            };
+                                        })
+                                        .ToList();
+
+                                    foreach (var fileNameMap in fileNameMaps)
                                     {
-                                        var fileInfos =
-                                            targetDirectoryInfo.imageFiles
-                                            .Select(imageFileInfo =>
-                                            {
-                                                var value = new
-                                                {
-                                                    imageFileInfo,
-                                                    isWideImage = onlyImageFile ? IsWideImage(imageFileInfo) : false,
-                                                };
-                                                AddProgress(1);
-                                                return value;
-                                            })
-                                            .ToList();
-                                        var temporaryPrefix = GetTemporaryFilePrefix(imageFileDirectory);
-                                        var totalPageCount = fileInfos.Sum(item => item.isWideImage ? 2 : 1);
-                                        var numberWidth = totalPageCount.ToString().Length;
-                                        var numberFormat = $"D{numberWidth}";
-                                        var pageCount = 1;
+                                        if (!string.Equals(fileNameMap.sourceFile.FullName, fileNameMap.destinationFileName, StringComparison.OrdinalIgnoreCase))
+                                            File.Move(fileNameMap.sourceFile.FullName, fileNameMap.temporaryFileName);
+                                    }
 
-                                        var fileNameMaps =
-                                            fileInfos
-                                            .OrderBy(fileInfo => fileInfo.imageFileInfo.Name, StringComparer.OrdinalIgnoreCase)
-                                            .Select((fileInfo, index) =>
-                                            {
-                                                var isFirstPage = pageCount == 1;
-                                                var isWideImage = !isFirstPage && fileInfo.isWideImage;
-                                                var destinationPageNumber = isWideImage ? $"{pageCount.ToString(numberFormat)}-{(pageCount + 1).ToString(numberFormat)}" : pageCount.ToString(numberFormat);
-                                                pageCount += isWideImage ? 2 : 1;
-                                                var extension = fileInfo.imageFileInfo.Extension;
-                                                var destinationFileName = Path.Combine(imageFileDirectory.FullName, $"{prefix ?? ""}{destinationPageNumber}{extension}");
-
-                                                if ((pageCount & 1) != 0 && isWideImage)
-                                                    PrintWarningMessage($"見開きページが偶数ページ番号ではありません。: page=\"{destinationPageNumber}\", file=\"{destinationFileName}\"");
-
-                                                return new
-                                                {
-                                                    sourceFile = fileInfo.imageFileInfo,
-                                                    temporaryFileName = Path.Combine(imageFileDirectory.FullName, $"{temporaryPrefix}{destinationPageNumber}{extension}"),
-                                                    destinationFileName,
-                                                };
-                                            })
-                                            .ToList();
-
-                                        foreach (var fileNameMap in fileNameMaps)
-                                        {
-                                            if (!string.Equals(fileNameMap.sourceFile.FullName, fileNameMap.destinationFileName, StringComparison.OrdinalIgnoreCase))
-                                                File.Move(fileNameMap.sourceFile.FullName, fileNameMap.temporaryFileName);
-                                        }
-
-                                        foreach (var fileNameMap in fileNameMaps)
-                                        {
-                                            if (!string.Equals(fileNameMap.sourceFile.FullName, fileNameMap.destinationFileName, StringComparison.OrdinalIgnoreCase))
-                                                File.Move(fileNameMap.temporaryFileName, fileNameMap.destinationFileName);
-                                        }
+                                    foreach (var fileNameMap in fileNameMaps)
+                                    {
+                                        if (!string.Equals(fileNameMap.sourceFile.FullName, fileNameMap.destinationFileName, StringComparison.OrdinalIgnoreCase))
+                                            File.Move(fileNameMap.temporaryFileName, fileNameMap.destinationFileName);
                                     }
                                 }
                             }
