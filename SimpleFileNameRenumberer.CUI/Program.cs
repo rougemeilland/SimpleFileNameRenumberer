@@ -13,33 +13,36 @@ namespace SimpleFileNameRenumberer.CUI
         private readonly static string _thisProgramName;
 
         static Program()
-            => _thisProgramName = Path.GetFileNameWithoutExtension(typeof(Program).Assembly.Location);
+        {
+            _thisProgramName = Path.GetFileNameWithoutExtension(typeof(Program).Assembly.Location);
+        }
 
         private static int Main(string[] args)
         {
             var prefix = (string?)null;
             var extensions = new List<string>();
             var onlyImageFile = false;
+            var resetMonochromeImageTimestamp = false;
             var targetFiles = new List<FileInfo>();
             for (var index = 0; index < args.Length; ++index)
             {
                 var arg = args[index];
-                if (arg == "-prefix")
+                if (arg == "--prefix")
                 {
                     if (index + 1 >= args.Length)
                     {
-                        PrintErrorMessage("-prefixオプション の値が指定されていません。");
+                        PrintErrorMessage("--prefixオプション の値が指定されていません。");
                         return 1;
                     }
 
                     prefix = args[index + 1];
                     ++index;
                 }
-                else if (arg == "-extension")
+                else if (arg == "--extension")
                 {
                     if (index + 1 >= args.Length)
                     {
-                        PrintErrorMessage("-extensionオプション の値が指定されていません。");
+                        PrintErrorMessage("--extensionオプション の値が指定されていません。");
                         return 1;
                     }
 
@@ -47,7 +50,7 @@ namespace SimpleFileNameRenumberer.CUI
                     {
                         if (ext.Length <= 0)
                         {
-                            PrintErrorMessage("-extension オプションで長さが 0 の拡張子が指定されています。");
+                            PrintErrorMessage("--extension オプションで長さが 0 の拡張子が指定されています。");
                             return 1;
                         }
 
@@ -58,11 +61,27 @@ namespace SimpleFileNameRenumberer.CUI
 
                     ++index;
                 }
-                else if (arg == "-only_image_file")
+                else if (arg == "--only_image_file")
                 {
+                    if (!OperatingSystem.IsWindowsVersionAtLeast(6, 1))
+                    {
+                        PrintErrorMessage($"このオペレーティングシステムではサポートされていないオプションが指定されています。: \"{arg}\"");
+                        return 1;
+                    }
+
                     onlyImageFile = true;
                 }
-                else if (arg.StartsWith("-", StringComparison.Ordinal))
+                else if (arg == "--reset_monochrome_image_timestamp")
+                {
+                    if (!OperatingSystem.IsWindowsVersionAtLeast(6, 1))
+                    {
+                        PrintErrorMessage($"このオペレーティングシステムではサポートされていないオプションが指定されています。: \"{arg}\"");
+                        return 1;
+                    }
+
+                    resetMonochromeImageTimestamp = true;
+                }
+                else if (arg.StartsWith('-'))
                 {
                     PrintErrorMessage($"サポートされていないオプションが指定されています。: \"{arg}\"");
                     return 1;
@@ -78,7 +97,7 @@ namespace SimpleFileNameRenumberer.CUI
                         else if (Directory.Exists(arg))
                         {
                             foreach (var file in new DirectoryInfo(arg).EnumerateFiles("*", SearchOption.AllDirectories))
-                                targetFiles.Add(file);
+                                    targetFiles.Add(file);
                         }
                         else
                         {
@@ -94,7 +113,13 @@ namespace SimpleFileNameRenumberer.CUI
                 }
             }
 
-            if (extensions.Any())
+            if (resetMonochromeImageTimestamp && !onlyImageFile)
+            {
+                PrintErrorMessage("--reset_monochrome_image_timestamp オプションは --only_image_file とともに指定する必要があります。");
+                return 1;
+            }
+
+            if (extensions.Count > 0)
             {
                 targetFiles =
                     targetFiles
@@ -102,66 +127,97 @@ namespace SimpleFileNameRenumberer.CUI
                     .ToList();
             }
 
-            targetFiles =
-                targetFiles
-                .Where(file => IsEnableImageDirectory(file.Directory))
-                .ToList();
-
             try
             {
                 if (targetFiles.Count > 0)
                 {
-                    InitializeProgress(targetFiles.Count * 2);
+                    InitializeProgress(targetFiles.Count * 5);
                     AddProgress(0);
 
                     var targetDirectoryInfos =
                         targetFiles
-                        .Select(imageFile =>
+                        .Select(file =>
                         {
                             var fileInfo = new
                             {
-                                dir = imageFile.Directory ?? throw new Exception($"不正なファイル名です。: \"{imageFile.FullName}\""),
-                                imageFile,
-                                ext = imageFile.Extension.ToUpperInvariant(),
+                                directory = file.Directory ?? throw new Exception($"不正なファイル名です。: \"{file.FullName}\""),
+                                file,
                             };
 
                             return fileInfo;
                         })
-                        .GroupBy(item => item.dir.FullName)
+                        .GroupBy(item => item.directory.FullName, StringComparer.OrdinalIgnoreCase)
                         .Select(g => new
                         {
-                            g.First().dir,
-                            imageFiles = g.Select(item => item.imageFile).ToList(),
+                            g.First().directory,
+                            isEnabledImageDirectory = IsEnableImageDirectory(g.First().directory),
+                            imageFiles = g.Select(item => item.file).ToList(),
                         })
                         .ToList();
 
                     foreach (var targetDirectoryInfo in targetDirectoryInfos)
                     {
-                        try
+                        var monochromeImageFiles = new List<FileInfo>();
+                        var nonMonochromeImageFiles = new List<(FileInfo imageFile, DateTime lastWriteTime, DateTime lastAccessTime, DateTime creationTime)>();
+                        if (!targetDirectoryInfo.isEnabledImageDirectory)
                         {
-                            if (targetDirectoryInfo.imageFiles.Count < 2)
+                            foreach (var file in targetDirectoryInfo.imageFiles)
+                                nonMonochromeImageFiles.Add((file, file.LastWriteTimeUtc, Minimum(file.LastAccessTimeUtc, file.LastWriteTimeUtc), Minimum(file.CreationTimeUtc, file.LastWriteTimeUtc)));
+                            AddProgress(targetDirectoryInfo.imageFiles.Count * 4);
+                        }
+                        else if (targetDirectoryInfo.imageFiles.Count < 2)
+                        {
+                            PrintWarningMessage($"ディレクトリ配下にファイルが1つしかないため変名を行いません。: \"{targetDirectoryInfo.directory.FullName}\"");
+                            foreach (var file in targetDirectoryInfo.imageFiles)
+                                nonMonochromeImageFiles.Add((file, file.LastWriteTimeUtc, Minimum(file.LastAccessTimeUtc, file.LastWriteTimeUtc), Minimum(file.CreationTimeUtc, file.LastWriteTimeUtc)));
+                            AddProgress(targetDirectoryInfo.imageFiles.Count * 4);
+                        }
+                        else
+                        {
+                            var imageFileDirectory = targetDirectoryInfo.directory;
+                            if (!ExistDuplicateFileNames(imageFileDirectory, targetDirectoryInfo.imageFiles.Select(imageFile => imageFile.Name)))
                             {
-                                PrintWarningMessage($"ディレクトリ配下にファイルが1つしかないため変名を行いません。: \"{targetDirectoryInfo.dir}\"");
-                                AddProgress(targetDirectoryInfo.imageFiles.Count);
+                                AddProgress(targetDirectoryInfo.imageFiles.Count * 5);
                             }
                             else
                             {
-                                var imageFileDirectory = targetDirectoryInfo.dir;
-                                if (ExistDuplicateFileNames(imageFileDirectory, targetDirectoryInfo.imageFiles.Select(imageFile => imageFile.Name)))
-                                {
-                                    var fileInfos =
-                                        targetDirectoryInfo.imageFiles
-                                        .Select(imageFileInfo =>
+                                var fileInfos =
+                                    targetDirectoryInfo.imageFiles
+                                    .Select(imageFile =>
+                                    {
+                                        if (onlyImageFile)
                                         {
+                                            var (isWideImage, isMonochromeImage) = CheckImage(imageFile);
                                             var value = new
                                             {
-                                                imageFileInfo,
-                                                isWideImage = onlyImageFile ? IsWideImage(imageFileInfo) : false,
+                                                imageFile,
+                                                lastWriteTime = imageFile.LastWriteTimeUtc,
+                                                lastAccessTime = Minimum(imageFile.LastAccessTimeUtc, imageFile.LastWriteTimeUtc),
+                                                creationTime = Minimum(imageFile.CreationTimeUtc, imageFile.LastWriteTimeUtc),
+                                                isWideImage,
+                                                isMonochromeImage,
                                             };
                                             AddProgress(1);
                                             return value;
-                                        })
-                                        .ToList();
+                                        }
+                                        else
+                                        {
+                                            var value = new
+                                            {
+                                                imageFile,
+                                                lastWriteTime = imageFile.LastWriteTimeUtc,
+                                                lastAccessTime = Minimum(imageFile.LastAccessTimeUtc, imageFile.LastWriteTimeUtc),
+                                                creationTime = Minimum(imageFile.CreationTimeUtc, imageFile.LastWriteTimeUtc),
+                                                isWideImage = false,
+                                                isMonochromeImage = false,
+                                            };
+                                            AddProgress(1);
+                                            return value;
+                                        }
+                                    })
+                                    .ToList();
+                                if (targetDirectoryInfo.isEnabledImageDirectory)
+                                {
                                     var temporaryPrefix = GetTemporaryFilePrefix(imageFileDirectory);
                                     var totalPageCount = fileInfos.Sum(item => item.isWideImage ? 2 : 1);
                                     var numberWidth = totalPageCount.ToString().Length;
@@ -170,45 +226,108 @@ namespace SimpleFileNameRenumberer.CUI
 
                                     var fileNameMaps =
                                         fileInfos
-                                        .OrderBy(fileInfo => fileInfo.imageFileInfo.Name, StringComparer.OrdinalIgnoreCase)
+                                        .OrderBy(fileInfo => fileInfo.imageFile.Name, StringComparer.OrdinalIgnoreCase)
                                         .Select((fileInfo, index) =>
                                         {
                                             var isFirstPage = pageCount == 1;
                                             var isWideImage = !isFirstPage && fileInfo.isWideImage;
                                             var destinationPageNumber = isWideImage ? $"{pageCount.ToString(numberFormat)}-{(pageCount + 1).ToString(numberFormat)}" : pageCount.ToString(numberFormat);
                                             pageCount += isWideImage ? 2 : 1;
-                                            var extension = fileInfo.imageFileInfo.Extension;
-                                            var destinationFileName = Path.Combine(imageFileDirectory.FullName, $"{prefix ?? ""}{destinationPageNumber}{extension}");
+                                            var extension = fileInfo.imageFile.Extension;
+                                            var destinationFile = new FileInfo(Path.Combine(imageFileDirectory.FullName, $"{prefix ?? ""}{destinationPageNumber}{extension}"));
 
                                             if ((pageCount & 1) != 0 && isWideImage)
-                                                PrintWarningMessage($"見開きページが偶数ページ番号ではありません。: page=\"{destinationPageNumber}\", file=\"{destinationFileName}\"");
+                                                PrintWarningMessage($"見開きページが偶数ページ番号ではありません。: page=\"{destinationPageNumber}\", file=\"{destinationFile.FullName}\"");
 
                                             return new
                                             {
-                                                sourceFile = fileInfo.imageFileInfo,
+                                                sourceFile = fileInfo.imageFile,
                                                 temporaryFileName = Path.Combine(imageFileDirectory.FullName, $"{temporaryPrefix}{destinationPageNumber}{extension}"),
-                                                destinationFileName,
+                                                destinationFile,
+                                                lastWriteTime = fileInfo.imageFile.LastWriteTimeUtc,
+                                                lastAccessTime = Minimum(fileInfo.imageFile.LastAccessTimeUtc, fileInfo.imageFile.LastWriteTimeUtc),
+                                                creationTime = Minimum(fileInfo.imageFile.CreationTimeUtc, fileInfo.imageFile.LastWriteTimeUtc),
+                                                isWideImage = false,
+                                                fileInfo.isMonochromeImage,
                                             };
                                         })
                                         .ToList();
 
                                     foreach (var fileNameMap in fileNameMaps)
                                     {
-                                        if (!string.Equals(fileNameMap.sourceFile.FullName, fileNameMap.destinationFileName, StringComparison.OrdinalIgnoreCase))
+                                        if (!string.Equals(fileNameMap.sourceFile.FullName, fileNameMap.destinationFile.FullName, StringComparison.OrdinalIgnoreCase))
                                             File.Move(fileNameMap.sourceFile.FullName, fileNameMap.temporaryFileName);
+                                        AddProgress(1);
                                     }
 
                                     foreach (var fileNameMap in fileNameMaps)
                                     {
-                                        if (!string.Equals(fileNameMap.sourceFile.FullName, fileNameMap.destinationFileName, StringComparison.OrdinalIgnoreCase))
-                                            File.Move(fileNameMap.temporaryFileName, fileNameMap.destinationFileName);
+                                        if (!string.Equals(fileNameMap.sourceFile.FullName, fileNameMap.destinationFile.FullName, StringComparison.OrdinalIgnoreCase))
+                                            File.Move(fileNameMap.temporaryFileName, fileNameMap.destinationFile.FullName);
+                                        AddProgress(1);
+                                    }
+
+                                    foreach (var fileNameMap in fileNameMaps)
+                                    {
+                                        if (fileNameMap.isMonochromeImage)
+                                            monochromeImageFiles.Add(fileNameMap.destinationFile);
+                                        else
+                                            nonMonochromeImageFiles.Add((fileNameMap.destinationFile, fileNameMap.lastWriteTime, fileNameMap.lastAccessTime, fileNameMap.creationTime));
+                                        AddProgress(1);
+                                    }
+                                }
+                                else
+                                {
+                                    foreach (var fileInfo in fileInfos)
+                                    {
+                                        if (fileInfo.isMonochromeImage)
+                                            monochromeImageFiles.Add(fileInfo.imageFile);
+                                        else
+                                            nonMonochromeImageFiles.Add((fileInfo.imageFile, fileInfo.lastWriteTime, fileInfo.lastAccessTime, fileInfo.creationTime));
+                                        AddProgress(3);
                                     }
                                 }
                             }
                         }
-                        finally
+
+                        if (resetMonochromeImageTimestamp)
                         {
-                            AddProgress(targetDirectoryInfo.imageFiles.Count);
+                            var minimumLastWriteTime = DateTime.MaxValue;
+                            var minimumLastAccessTime = DateTime.MaxValue;
+                            var minimumCreationTime = DateTime.MaxValue;
+                            foreach (var (file, lastWriteTime, lastAccessTime, creationTime) in nonMonochromeImageFiles)
+                            {
+                                minimumLastWriteTime = Minimum(minimumLastWriteTime, lastWriteTime);
+                                minimumLastAccessTime = Minimum(minimumLastAccessTime, lastAccessTime);
+                                minimumCreationTime = Minimum(minimumCreationTime, lastWriteTime);
+                            }
+
+                            foreach (var monochromeImageFile in monochromeImageFiles)
+                            {
+                                monochromeImageFile.Refresh();
+                                if (minimumLastWriteTime != DateTime.MaxValue)
+                                    monochromeImageFile.LastWriteTimeUtc = minimumLastWriteTime;
+                                if (minimumLastAccessTime != DateTime.MaxValue)
+                                    monochromeImageFile.LastAccessTimeUtc = minimumLastAccessTime;
+                                if (minimumCreationTime != DateTime.MaxValue)
+                                    monochromeImageFile.CreationTimeUtc = minimumCreationTime;
+                                monochromeImageFile.Refresh();
+                                AddProgress(1);
+                            }
+
+                            foreach (var (file, lastWriteTime, lastAccessTime, creationTime) in nonMonochromeImageFiles)
+                            {
+                                file.Refresh();
+                                file.LastWriteTimeUtc = lastWriteTime;
+                                file.LastAccessTimeUtc = lastAccessTime;
+                                file.CreationTimeUtc = creationTime;
+                                file.Refresh();
+                                AddProgress(1);
+                            }
+                        }
+                        else
+                        {
+                            AddProgress(monochromeImageFiles.Count + nonMonochromeImageFiles.Count);
                         }
                     }
 
@@ -244,18 +363,78 @@ namespace SimpleFileNameRenumberer.CUI
             return true;
         }
 
-        [SuppressMessage("Interoperability", "CA1416:プラットフォームの互換性を検証", Justification = "<保留中>")]
-        private static bool IsWideImage(FileInfo imageFile)
+        private static (bool isWide, bool isMonochrome) CheckImage(FileInfo imageFile)
         {
+            if (!OperatingSystem.IsWindowsVersionAtLeast(6, 1))
+                throw new NotSupportedException();
+
             try
             {
                 using var image = new Bitmap(imageFile.FullName);
-                return image.Width > image.Height;
+                var isWide = CheckIfWideImage(image);
+                var isMonochrome = CheckIfMonochromeImage(image);
+                return (isWide, isMonochrome);
             }
             catch (Exception ex)
             {
                 throw new Exception($"画像ではないファイルが含まれています。: \"{imageFile.FullName}\"", ex);
             }
+        }
+
+        private static bool CheckIfWideImage(Bitmap image)
+        {
+            if (!OperatingSystem.IsWindowsVersionAtLeast(6, 1))
+                throw new NotSupportedException();
+
+            return image.Width > image.Height;
+        }
+
+        private static bool CheckIfMonochromeImage(Bitmap image)
+        {
+            if (!OperatingSystem.IsWindowsVersionAtLeast(6, 1))
+                throw new NotSupportedException();
+
+            var left = 0;
+            var top = 0;
+            var right = image.Width - 1;
+            var bottom = image.Height - 1;
+            var sampleColor = image.GetPixel(left, top);
+            while (right > left && bottom > top)
+            {
+                for (var x = left + 1; x <= right; ++x)
+                {
+                    if (image.GetPixel(x, top) != sampleColor)
+                        return false;
+                }
+
+                ++top;
+
+                for (var y = top; y <= bottom; ++y)
+                {
+                    if (image.GetPixel(left, y) != sampleColor)
+                        return false;
+                }
+
+                ++left;
+
+                for (var x = left; x <= right; ++x)
+                {
+                    if (image.GetPixel(x, bottom) != sampleColor)
+                        return false;
+                }
+
+                --bottom;
+
+                for (var y = top; y <= bottom; ++y)
+                {
+                    if (image.GetPixel(right, y) != sampleColor)
+                        return false;
+                }
+
+                --right;
+            }
+
+            return true;
         }
 
         private static bool ExistDuplicateFileNames(DirectoryInfo? baseDirectory, IEnumerable<string> fileNames)
@@ -352,6 +531,21 @@ namespace SimpleFileNameRenumberer.CUI
 
             PrintWarningMessage($"同一ディレクトリ配下に順番が曖昧なファイル名が存在するため、このディレクトリ配下のファイルの名前の変名は行いません。: dir=\"{dir}\", name1=\"{fileName1}\", name2=\"{fileName2}\"");
             return false;
+        }
+
+        private static DateTime Minimum(DateTime dateTime1, DateTime dateTime2)
+        {
+            if (dateTime1 != DateTime.MaxValue && dateTime2 != DateTime.MaxValue && dateTime1.Kind != dateTime2.Kind)
+                throw new Exception();
+
+            return
+                dateTime1 == DateTime.MaxValue
+                ? dateTime2
+                : dateTime2 == DateTime.MaxValue
+                ? dateTime1
+                : dateTime1.CompareTo(dateTime2) < 0
+                ? dateTime1
+                : dateTime2;
         }
 
         private static int _totalFileCount = 0;
