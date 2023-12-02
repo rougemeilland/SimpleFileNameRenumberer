@@ -1,9 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
+using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace SimpleFileNameRenumberer.CUI
 {
@@ -97,7 +99,7 @@ namespace SimpleFileNameRenumberer.CUI
                         else if (Directory.Exists(arg))
                         {
                             foreach (var file in new DirectoryInfo(arg).EnumerateFiles("*", SearchOption.AllDirectories))
-                                    targetFiles.Add(file);
+                                targetFiles.Add(file);
                         }
                         else
                         {
@@ -389,11 +391,86 @@ namespace SimpleFileNameRenumberer.CUI
             return image.Width > image.Height;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveOptimization)]
         private static bool CheckIfMonochromeImage(Bitmap image)
         {
             if (!OperatingSystem.IsWindowsVersionAtLeast(6, 1))
                 throw new NotSupportedException();
 
+#if true // unsafe 版
+            // PixelFormat.Format32bppArgb の場合は 1 ピクセルは 4 バイト
+            const PixelFormat pixelFormat = PixelFormat.Format32bppArgb;
+            const int sizeOfPixel = 4;
+
+            var bitmapData =
+                image.LockBits(
+                    new Rectangle(0, 0, image.Width, image.Height),
+                    ImageLockMode.ReadOnly, pixelFormat);
+            try
+            {
+                var stride = Math.Abs(bitmapData.Stride);
+                var imageBytesLength = stride * bitmapData.Height;
+                if (imageBytesLength <= 0)
+                {
+                    // width あるいは height が 0の場合
+                    return true;
+                }
+                var imageBytes = new byte[imageBytesLength];
+                Marshal.Copy(bitmapData.Scan0, imageBytes, 0, imageBytes.Length);
+                var columnLength = bitmapData.Width * sizeOfPixel;
+                unsafe
+                {
+                    fixed (byte* imageBytesTop = imageBytes)
+                    {
+                        var samplePixel = GetPixel(imageBytesTop);
+                        var endOfBytes = imageBytesTop + imageBytes.Length;
+                        if (stride == sizeOfPixel * image.Width)
+                        {
+                            // 1 行の右端までピクセルデータがみっしりと詰まっている場合
+
+                            for (var p = imageBytesTop + sizeOfPixel; p < endOfBytes; p += sizeOfPixel)
+                            {
+                                if (GetPixel(p) != samplePixel)
+                                    return false;
+                            }
+                        }
+                        else
+                        {
+                            // 1 行の右端に余白がある場合
+                            // (1 ピクセルが 4 バイトであり、かつ .NET の仕様上 stride は 4 の倍数なので、このルートに到達することはほぼない)
+
+                            var row = imageBytesTop;
+                            while (row < endOfBytes)
+                            {
+                                var endOfColumn = row + columnLength;
+                                var column = row;
+                                while (column < endOfColumn)
+                                {
+                                    if (GetPixel(column) != samplePixel)
+                                        return false;
+                                    column += sizeOfPixel;
+                                }
+
+                                row += stride;
+                            }
+                        }
+
+                        return true;
+                    }
+                }
+            }
+            finally
+            {
+                image.UnlockBits(bitmapData);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+            static unsafe uint GetPixel(byte* p)
+                => ((uint)p[0] << (8 * 0))
+                    | ((uint)p[1] << (8 * 1))
+                    | ((uint)p[2] << (8 * 2))
+                    | ((uint)p[3] << (8 * 3));
+#else // safe 版
             var left = 0;
             var top = 0;
             var right = image.Width - 1;
@@ -435,6 +512,7 @@ namespace SimpleFileNameRenumberer.CUI
             }
 
             return true;
+#endif
         }
 
         private static bool ExistDuplicateFileNames(DirectoryInfo? baseDirectory, IEnumerable<string> fileNames)
