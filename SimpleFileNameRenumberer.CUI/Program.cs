@@ -397,7 +397,6 @@ namespace SimpleFileNameRenumberer.CUI
             if (!OperatingSystem.IsWindowsVersionAtLeast(6, 1))
                 throw new NotSupportedException();
 
-#if true // unsafe 版
             // PixelFormat.Format32bppArgb の場合は 1 ピクセルは 4 バイト
             const PixelFormat pixelFormat = PixelFormat.Format32bppArgb;
             const int sizeOfPixel = 4;
@@ -422,16 +421,35 @@ namespace SimpleFileNameRenumberer.CUI
                 {
                     fixed (byte* imageBytesTop = imageBytes)
                     {
-                        var samplePixel = GetPixel(imageBytesTop);
                         var endOfBytes = imageBytesTop + imageBytes.Length;
                         if (stride == sizeOfPixel * image.Width)
                         {
                             // 1 行の右端までピクセルデータがみっしりと詰まっている場合
 
-                            for (var p = imageBytesTop + sizeOfPixel; p < endOfBytes; p += sizeOfPixel)
+                            if (sizeOfPixel == sizeof(uint) && (unchecked((int)imageBytesTop) & (sizeof(uint) - 1)) == 0)
                             {
-                                if (GetPixel(p) != samplePixel)
-                                    return false;
+                                // ポインタ imageBytesTop が uint のアラインメント境界上にある場合
+                                // (おそらく大半がこのルートに到達する)
+
+                                // imageBytesTop から始まるデータを uint の配列として扱う
+                                var ptr = (uint*)imageBytesTop;
+                                var samplePixel = *ptr++;
+                                while (ptr < endOfBytes)
+                                {
+                                    if (*ptr++ != samplePixel)
+                                        return false;
+                                }
+                            }
+                            else
+                            {
+                                // ポインタ imageBytesTop が uint のアラインメント境界上にない場合
+
+                                var samplePixel = GetPixel(imageBytesTop);
+                                for (var p = imageBytesTop + sizeOfPixel; p < endOfBytes; p += sizeOfPixel)
+                                {
+                                    if (GetPixel(p) != samplePixel)
+                                        return false;
+                                }
                             }
                         }
                         else
@@ -439,6 +457,7 @@ namespace SimpleFileNameRenumberer.CUI
                             // 1 行の右端に余白がある場合
                             // (1 ピクセルが 4 バイトであり、かつ .NET の仕様上 stride は 4 の倍数なので、このルートに到達することはほぼない)
 
+                            var samplePixel = GetPixel(imageBytesTop);
                             var row = imageBytesTop;
                             while (row < endOfBytes)
                             {
@@ -470,49 +489,6 @@ namespace SimpleFileNameRenumberer.CUI
                     | ((uint)p[1] << (8 * 1))
                     | ((uint)p[2] << (8 * 2))
                     | ((uint)p[3] << (8 * 3));
-#else // safe 版
-            var left = 0;
-            var top = 0;
-            var right = image.Width - 1;
-            var bottom = image.Height - 1;
-            var sampleColor = image.GetPixel(left, top);
-            while (right > left && bottom > top)
-            {
-                for (var x = left + 1; x <= right; ++x)
-                {
-                    if (image.GetPixel(x, top) != sampleColor)
-                        return false;
-                }
-
-                ++top;
-
-                for (var y = top; y <= bottom; ++y)
-                {
-                    if (image.GetPixel(left, y) != sampleColor)
-                        return false;
-                }
-
-                ++left;
-
-                for (var x = left; x <= right; ++x)
-                {
-                    if (image.GetPixel(x, bottom) != sampleColor)
-                        return false;
-                }
-
-                --bottom;
-
-                for (var y = top; y <= bottom; ++y)
-                {
-                    if (image.GetPixel(right, y) != sampleColor)
-                        return false;
-                }
-
-                --right;
-            }
-
-            return true;
-#endif
         }
 
         private static bool ExistDuplicateFileNames(DirectoryInfo? baseDirectory, IEnumerable<string> fileNames)
