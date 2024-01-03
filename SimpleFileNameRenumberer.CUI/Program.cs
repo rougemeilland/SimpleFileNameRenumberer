@@ -21,6 +21,15 @@ namespace SimpleFileNameRenumberer.CUI
 
         private static int Main(string[] args)
         {
+            var exitCode = DoProcess(args);
+            Console.WriteLine();
+            Console.Beep();
+            _ = Console.ReadLine();
+            return exitCode;
+        }
+
+        private static int DoProcess(string[] args)
+        {
             var prefix = (string?)null;
             var extensions = new List<string>();
             var onlyImageFile = false;
@@ -342,11 +351,7 @@ namespace SimpleFileNameRenumberer.CUI
                 return 1;
             }
 
-            Console.WriteLine();
             Console.WriteLine("完了しました。");
-            Console.Beep();
-            _ = Console.ReadLine();
-
             return 0;
         }
 
