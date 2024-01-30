@@ -1,9 +1,9 @@
-﻿using System.Drawing;
-using System;
+﻿using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
-using System.Collections.Generic;
-using System.Drawing.Imaging;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -341,8 +341,6 @@ namespace SimpleFileNameRenumberer.CUI
                             AddProgress(monochromeImageFiles.Count + nonMonochromeImageFiles.Count, targetDirectoryInfo.directory.FullName);
                         }
                     }
-
-                    Console.WriteLine();
                 }
             }
             catch (OperationCanceledException)
@@ -355,6 +353,7 @@ namespace SimpleFileNameRenumberer.CUI
                 return ResultCode.Failed;
             }
 
+            AddProgress(0);
             return ResultCode.Success;
         }
 
@@ -637,7 +636,7 @@ namespace SimpleFileNameRenumberer.CUI
         {
             _fileCount += deltaFileCount;
 
-            ReportProgress((double)_fileCount / _totalFileCount, path, (percentage, content) => $"変名中… {percentage}");
+            ReportProgress((double)_fileCount / _totalFileCount, path, (percentage, content) => $"変名中… {percentage} (\"{content}\")");
         }
     }
 }
