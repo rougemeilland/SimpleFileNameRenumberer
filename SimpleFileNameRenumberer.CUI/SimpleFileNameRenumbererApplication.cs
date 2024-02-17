@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
@@ -7,6 +8,8 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading.Tasks;
+using Palmtree;
 using Palmtree.Application;
 using Palmtree.IO;
 using Palmtree.IO.Console;
@@ -17,10 +20,24 @@ namespace SimpleFileNameRenumberer.CUI
     public class SimpleFileNameRenumbererApplication
         : BatchApplication
     {
+        private static readonly FilePath? _ffmpegCommandPath;
         private readonly string _title;
         private readonly Encoding? _encoding;
         private int _totalFileCount;
         private int _fileCount;
+
+        static SimpleFileNameRenumbererApplication()
+        {
+            try
+            {
+                var path = ProcessUtility.WhereIs("ffmpeg");
+                _ffmpegCommandPath = path is not null ? new FilePath(path) : null;
+            }
+            catch (Exception)
+            {
+                _ffmpegCommandPath = null;
+            }
+        }
 
         public SimpleFileNameRenumbererApplication(string title, Encoding? encoding)
         {
@@ -389,6 +406,14 @@ namespace SimpleFileNameRenumberer.CUI
 
         private static (bool isWide, bool isMonochrome) CheckImage(FilePath imageFile)
         {
+            if (string.Equals(imageFile.Extension, ".avif", StringComparison.OrdinalIgnoreCase))
+                return CheckImageForAvif(imageFile);
+            else
+                return CheckImageForGenericImage(imageFile);
+        }
+
+        private static (bool isWide, bool isMonochrome) CheckImageForGenericImage(FilePath imageFile)
+        {
             if (!OperatingSystem.IsWindowsVersionAtLeast(6, 1))
                 throw new NotSupportedException();
 
@@ -402,6 +427,78 @@ namespace SimpleFileNameRenumberer.CUI
             catch (Exception ex)
             {
                 throw new Exception($"画像ではないファイルが含まれています。: \"{imageFile.FullName}\"", ex);
+            }
+        }
+
+        private static (bool isWide, bool isMonochrome) CheckImageForAvif(FilePath imageFile)
+        {
+            var baseDirectory = imageFile.Directory;
+            var destinationImageFile = (FilePath?)null;
+            try
+            {
+                for (var count = 0; ; ++count)
+                {
+                    var destinationFileName = $".temp-{count}.bmp";
+                    try
+                    {
+                        destinationImageFile = baseDirectory.GetFile(destinationFileName);
+                        using var s = destinationImageFile.CreateNew();
+                        break;
+                    }
+                    catch (Exception)
+                    {
+                    }
+                }
+
+                Validation.Assert(destinationImageFile is not null, "destinationImageFile is not null");
+
+                if (_ffmpegCommandPath is null)
+                    throw new Exception("AVIF ファイルをサポートするためには ffmpeg がインストールされている必要があります。");
+
+                var startInfo = new ProcessStartInfo
+                {
+                    FileName = _ffmpegCommandPath.FullName,
+                    Arguments = $"-hide_banner -y -i {imageFile.Name.CommandLineArgumentEncode()} -map 0:v:0 -frames:v:0 1 -update 1 {destinationImageFile.Name.CommandLineArgumentEncode()}",
+                    WorkingDirectory = baseDirectory.FullName,
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                    RedirectStandardInput = true,
+                    StandardInputEncoding = Encoding.UTF8,
+                    RedirectStandardOutput = true,
+                    StandardOutputEncoding = Encoding.UTF8,
+                    RedirectStandardError = true,
+                    StandardErrorEncoding = Encoding.UTF8,
+                };
+
+                var process =
+                    Process.Start(startInfo)
+                    ?? throw new Exception("ffmpeg の実行に失敗しました。");
+
+                _ = Task.Run(() => CopyTextStream(TextReader.Null, process.StandardInput));
+                var standardOutputHandler = Task.Run(() => CopyTextStream(process.StandardOutput, TextWriter.Null));
+                var standardErrorHandler = Task.Run(() => CopyTextStream(process.StandardError, TextWriter.Null));
+                Task.WaitAll(standardOutputHandler, standardErrorHandler);
+                process.WaitForExit();
+                if (process.ExitCode != 0)
+                    throw new Exception($"ffmpeg が異常終了しました。: exitCode={process.ExitCode}, command=\"{startInfo.FileName} {startInfo.Arguments}\"");
+
+                return CheckImageForGenericImage(destinationImageFile);
+            }
+            finally
+            {
+                destinationImageFile?.SafetyDelete();
+            }
+
+            static void CopyTextStream(TextReader reader, TextWriter writer)
+            {
+                var buffer = new char[1024];
+                while (true)
+                {
+                    var length  = reader.Read(buffer, 0, buffer.Length);
+                    if (length <= 0)
+                        break;
+                    writer.Write(buffer, 0, length);
+                }
             }
         }
 
