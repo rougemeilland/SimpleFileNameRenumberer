@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFrameworks>net8.0-windows;net7.0-windows</TargetFrameworks>
+    <TargetFrameworks>net8.0-windows</TargetFrameworks>
     <Nullable>enable</Nullable>
     <UseWindowsForms>False</UseWindowsForms>
     <ImplicitUsings>disable</ImplicitUsings>
@@ -35,7 +35,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Palmtree.Application" Version="1.3.9-alpha" />
+    <PackageReference Include="Palmtree.Application" Version="1.3.10-alpha" />
   </ItemGroup>
 
 </Project>

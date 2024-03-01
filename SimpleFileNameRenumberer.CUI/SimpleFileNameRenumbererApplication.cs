@@ -507,7 +507,7 @@ namespace SimpleFileNameRenumberer.CUI
             if (!OperatingSystem.IsWindowsVersionAtLeast(6, 1))
                 throw new NotSupportedException();
 
-            return image.Width > image.Height;
+            return image.Width * 6 > image.Height * 5;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveOptimization)]
