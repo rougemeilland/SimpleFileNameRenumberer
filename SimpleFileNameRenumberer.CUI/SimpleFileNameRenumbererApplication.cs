@@ -177,185 +177,193 @@ namespace SimpleFileNameRenumberer.CUI
                     {
                         if (IsPressedBreak)
                             throw new OperationCanceledException();
-                        var monochromeImageFiles = new List<FilePath>();
-                        var nonMonochromeImageFiles = new List<(FilePath imageFile, DateTime lastWriteTime, DateTime lastAccessTime, DateTime creationTime)>();
-                        if (!targetDirectoryInfo.isEnabledImageDirectory)
+
+                        try
                         {
-                            foreach (var file in targetDirectoryInfo.imageFiles)
+                            var monochromeImageFiles = new List<FilePath>();
+                            var nonMonochromeImageFiles = new List<(FilePath imageFile, DateTime lastWriteTime, DateTime lastAccessTime, DateTime creationTime)>();
+                            if (!targetDirectoryInfo.isEnabledImageDirectory)
                             {
-                                if (IsPressedBreak)
-                                    throw new OperationCanceledException();
-                                nonMonochromeImageFiles.Add((file, file.LastWriteTimeUtc, Minimum(file.LastAccessTimeUtc, file.LastWriteTimeUtc), Minimum(file.CreationTimeUtc, file.LastWriteTimeUtc)));
+                                foreach (var file in targetDirectoryInfo.imageFiles)
+                                {
+                                    if (IsPressedBreak)
+                                        throw new OperationCanceledException();
+                                    nonMonochromeImageFiles.Add((file, file.LastWriteTimeUtc, Minimum(file.LastAccessTimeUtc, file.LastWriteTimeUtc), Minimum(file.CreationTimeUtc, file.LastWriteTimeUtc)));
+                                }
+                                AddProgress(targetDirectoryInfo.imageFiles.Count * 4, targetDirectoryInfo.directory.FullName);
                             }
-                            AddProgress(targetDirectoryInfo.imageFiles.Count * 4, targetDirectoryInfo.directory.FullName);
-                        }
-                        else if (targetDirectoryInfo.imageFiles.Count < 2)
-                        {
-                            ReportWarningMessage($"ディレクトリ配下にファイルが1つしかないため変名を行いません。: \"{targetDirectoryInfo.directory.FullName}\"");
-                            foreach (var file in targetDirectoryInfo.imageFiles)
+                            else if (targetDirectoryInfo.imageFiles.Count < 2)
                             {
-                                if (IsPressedBreak)
-                                    throw new OperationCanceledException();
-                                nonMonochromeImageFiles.Add((file, file.LastWriteTimeUtc, Minimum(file.LastAccessTimeUtc, file.LastWriteTimeUtc), Minimum(file.CreationTimeUtc, file.LastWriteTimeUtc)));
-                            }
-                            AddProgress(targetDirectoryInfo.imageFiles.Count * 4, targetDirectoryInfo.directory.FullName);
-                        }
-                        else
-                        {
-                            var imageFileDirectory = targetDirectoryInfo.directory;
-                            if (!ExistDuplicateFileNames(imageFileDirectory, targetDirectoryInfo.imageFiles.Select(imageFile => imageFile.Name)))
-                            {
-                                AddProgress(targetDirectoryInfo.imageFiles.Count * 5, targetDirectoryInfo.directory.FullName);
+                                ReportWarningMessage($"ディレクトリ配下にファイルが1つしかないため変名を行いません。: \"{targetDirectoryInfo.directory.FullName}\"");
+                                foreach (var file in targetDirectoryInfo.imageFiles)
+                                {
+                                    if (IsPressedBreak)
+                                        throw new OperationCanceledException();
+                                    nonMonochromeImageFiles.Add((file, file.LastWriteTimeUtc, Minimum(file.LastAccessTimeUtc, file.LastWriteTimeUtc), Minimum(file.CreationTimeUtc, file.LastWriteTimeUtc)));
+                                }
+                                AddProgress(targetDirectoryInfo.imageFiles.Count * 4, targetDirectoryInfo.directory.FullName);
                             }
                             else
                             {
-                                var fileInfos =
-                                    targetDirectoryInfo.imageFiles
-                                    .Select(imageFile =>
-                                    {
-                                        if (IsPressedBreak)
-                                            throw new OperationCanceledException();
-                                        if (onlyImageFile)
-                                        {
-                                            var (isWideImage, isMonochromeImage) = CheckImage(imageFile);
-                                            var value = new
-                                            {
-                                                imageFile,
-                                                lastWriteTime = imageFile.LastWriteTimeUtc,
-                                                lastAccessTime = Minimum(imageFile.LastAccessTimeUtc, imageFile.LastWriteTimeUtc),
-                                                creationTime = Minimum(imageFile.CreationTimeUtc, imageFile.LastWriteTimeUtc),
-                                                isWideImage,
-                                                isMonochromeImage,
-                                            };
-                                            AddProgress(1, targetDirectoryInfo.directory.FullName);
-                                            return value;
-                                        }
-                                        else
-                                        {
-                                            var value = new
-                                            {
-                                                imageFile,
-                                                lastWriteTime = imageFile.LastWriteTimeUtc,
-                                                lastAccessTime = Minimum(imageFile.LastAccessTimeUtc, imageFile.LastWriteTimeUtc),
-                                                creationTime = Minimum(imageFile.CreationTimeUtc, imageFile.LastWriteTimeUtc),
-                                                isWideImage = false,
-                                                isMonochromeImage = false,
-                                            };
-                                            AddProgress(1, targetDirectoryInfo.directory.FullName);
-                                            return value;
-                                        }
-                                    })
-                                    .ToList();
-                                if (targetDirectoryInfo.isEnabledImageDirectory)
+                                var imageFileDirectory = targetDirectoryInfo.directory;
+                                if (!ExistDuplicateFileNames(imageFileDirectory, targetDirectoryInfo.imageFiles.Select(imageFile => imageFile.Name)))
                                 {
-                                    var temporaryPrefix = GetTemporaryFilePrefix(imageFileDirectory);
-                                    var totalPageCount = fileInfos.Sum(item => item.isWideImage ? 2 : 1);
-                                    var numberWidth = totalPageCount.ToString().Length;
-                                    var numberFormat = $"D{numberWidth}";
-                                    var pageCount = 1;
-
-                                    var fileNameMaps =
-                                        fileInfos
-                                        .OrderBy(fileInfo => fileInfo.imageFile.Name, StringComparer.OrdinalIgnoreCase)
-                                        .Select((fileInfo, index) =>
-                                        {
-                                            if (IsPressedBreak)
-                                                throw new OperationCanceledException();
-                                            var isFirstPage = pageCount == 1;
-                                            var isWideImage = !isFirstPage && fileInfo.isWideImage;
-                                            var destinationPageNumber = isWideImage ? $"{pageCount.ToString(numberFormat)}-{(pageCount + 1).ToString(numberFormat)}" : pageCount.ToString(numberFormat);
-                                            pageCount += isWideImage ? 2 : 1;
-                                            var extension = fileInfo.imageFile.Extension;
-                                            var destinationFile = imageFileDirectory.GetFile($"{prefix ?? ""}{destinationPageNumber}{extension}");
-
-                                            if ((pageCount & 1) != 0 && isWideImage)
-                                                ReportWarningMessage($"見開きページが偶数ページ番号ではありません。: page=\"{destinationPageNumber}\", file=\"{destinationFile.FullName}\"");
-
-                                            return new
-                                            {
-                                                sourceFile = fileInfo.imageFile,
-                                                temporaryFileName = imageFileDirectory.GetFile($"{temporaryPrefix}{destinationPageNumber}{extension}"),
-                                                destinationFile,
-                                                lastWriteTime = fileInfo.imageFile.LastWriteTimeUtc,
-                                                lastAccessTime = Minimum(fileInfo.imageFile.LastAccessTimeUtc, fileInfo.imageFile.LastWriteTimeUtc),
-                                                creationTime = Minimum(fileInfo.imageFile.CreationTimeUtc, fileInfo.imageFile.LastWriteTimeUtc),
-                                                isWideImage = false,
-                                                fileInfo.isMonochromeImage,
-                                            };
-                                        })
-                                        .ToList();
-
-                                    foreach (var fileNameMap in fileNameMaps)
-                                    {
-                                        if (!string.Equals(fileNameMap.sourceFile.FullName, fileNameMap.destinationFile.FullName, StringComparison.OrdinalIgnoreCase))
-                                            fileNameMap.sourceFile.MoveTo(fileNameMap.temporaryFileName);
-                                        AddProgress(1, targetDirectoryInfo.directory.FullName);
-                                    }
-
-                                    foreach (var fileNameMap in fileNameMaps)
-                                    {
-                                        if (!string.Equals(fileNameMap.sourceFile.FullName, fileNameMap.destinationFile.FullName, StringComparison.OrdinalIgnoreCase))
-                                            fileNameMap.temporaryFileName.MoveTo(fileNameMap.destinationFile);
-                                        AddProgress(1, targetDirectoryInfo.directory.FullName);
-                                    }
-
-                                    foreach (var fileNameMap in fileNameMaps)
-                                    {
-                                        if (fileNameMap.isMonochromeImage)
-                                            monochromeImageFiles.Add(fileNameMap.destinationFile);
-                                        else
-                                            nonMonochromeImageFiles.Add((fileNameMap.destinationFile, fileNameMap.lastWriteTime, fileNameMap.lastAccessTime, fileNameMap.creationTime));
-                                        AddProgress(1, targetDirectoryInfo.directory.FullName);
-                                    }
+                                    AddProgress(targetDirectoryInfo.imageFiles.Count * 5, targetDirectoryInfo.directory.FullName);
                                 }
                                 else
                                 {
-                                    foreach (var fileInfo in fileInfos)
+                                    var fileInfos =
+                                        targetDirectoryInfo.imageFiles
+                                        .Select(imageFile =>
+                                        {
+                                            if (IsPressedBreak)
+                                                throw new OperationCanceledException();
+                                            if (onlyImageFile)
+                                            {
+                                                var (isWideImage, isMonochromeImage) = CheckImage(imageFile);
+                                                var value = new
+                                                {
+                                                    imageFile,
+                                                    lastWriteTime = imageFile.LastWriteTimeUtc,
+                                                    lastAccessTime = Minimum(imageFile.LastAccessTimeUtc, imageFile.LastWriteTimeUtc),
+                                                    creationTime = Minimum(imageFile.CreationTimeUtc, imageFile.LastWriteTimeUtc),
+                                                    isWideImage,
+                                                    isMonochromeImage,
+                                                };
+                                                AddProgress(1, targetDirectoryInfo.directory.FullName);
+                                                return value;
+                                            }
+                                            else
+                                            {
+                                                var value = new
+                                                {
+                                                    imageFile,
+                                                    lastWriteTime = imageFile.LastWriteTimeUtc,
+                                                    lastAccessTime = Minimum(imageFile.LastAccessTimeUtc, imageFile.LastWriteTimeUtc),
+                                                    creationTime = Minimum(imageFile.CreationTimeUtc, imageFile.LastWriteTimeUtc),
+                                                    isWideImage = false,
+                                                    isMonochromeImage = false,
+                                                };
+                                                AddProgress(1, targetDirectoryInfo.directory.FullName);
+                                                return value;
+                                            }
+                                        })
+                                        .ToList();
+                                    if (targetDirectoryInfo.isEnabledImageDirectory)
                                     {
-                                        if (fileInfo.isMonochromeImage)
-                                            monochromeImageFiles.Add(fileInfo.imageFile);
-                                        else
-                                            nonMonochromeImageFiles.Add((fileInfo.imageFile, fileInfo.lastWriteTime, fileInfo.lastAccessTime, fileInfo.creationTime));
-                                        AddProgress(3, targetDirectoryInfo.directory.FullName);
+                                        var temporaryPrefix = GetTemporaryFilePrefix(imageFileDirectory);
+                                        var totalPageCount = fileInfos.Sum(item => item.isWideImage ? 2 : 1);
+                                        var numberWidth = totalPageCount.ToString().Length;
+                                        var numberFormat = $"D{numberWidth}";
+                                        var pageCount = 1;
+
+                                        var fileNameMaps =
+                                            fileInfos
+                                            .OrderBy(fileInfo => fileInfo.imageFile.Name, StringComparer.OrdinalIgnoreCase)
+                                            .Select((fileInfo, index) =>
+                                            {
+                                                if (IsPressedBreak)
+                                                    throw new OperationCanceledException();
+                                                var isFirstPage = pageCount == 1;
+                                                var isWideImage = !isFirstPage && fileInfo.isWideImage;
+                                                var destinationPageNumber = isWideImage ? $"{pageCount.ToString(numberFormat)}-{(pageCount + 1).ToString(numberFormat)}" : pageCount.ToString(numberFormat);
+                                                pageCount += isWideImage ? 2 : 1;
+                                                var extension = fileInfo.imageFile.Extension;
+                                                var destinationFile = imageFileDirectory.GetFile($"{prefix ?? ""}{destinationPageNumber}{extension}");
+
+                                                if ((pageCount & 1) != 0 && isWideImage)
+                                                    ReportWarningMessage($"見開きページが偶数ページ番号ではありません。: page=\"{destinationPageNumber}\", file=\"{destinationFile.FullName}\"");
+
+                                                return new
+                                                {
+                                                    sourceFile = fileInfo.imageFile,
+                                                    temporaryFileName = imageFileDirectory.GetFile($"{temporaryPrefix}{destinationPageNumber}{extension}"),
+                                                    destinationFile,
+                                                    lastWriteTime = fileInfo.imageFile.LastWriteTimeUtc,
+                                                    lastAccessTime = Minimum(fileInfo.imageFile.LastAccessTimeUtc, fileInfo.imageFile.LastWriteTimeUtc),
+                                                    creationTime = Minimum(fileInfo.imageFile.CreationTimeUtc, fileInfo.imageFile.LastWriteTimeUtc),
+                                                    isWideImage = false,
+                                                    fileInfo.isMonochromeImage,
+                                                };
+                                            })
+                                            .ToList();
+
+                                        foreach (var fileNameMap in fileNameMaps)
+                                        {
+                                            if (!string.Equals(fileNameMap.sourceFile.FullName, fileNameMap.destinationFile.FullName, StringComparison.OrdinalIgnoreCase))
+                                                fileNameMap.sourceFile.MoveTo(fileNameMap.temporaryFileName);
+                                            AddProgress(1, targetDirectoryInfo.directory.FullName);
+                                        }
+
+                                        foreach (var fileNameMap in fileNameMaps)
+                                        {
+                                            if (!string.Equals(fileNameMap.sourceFile.FullName, fileNameMap.destinationFile.FullName, StringComparison.OrdinalIgnoreCase))
+                                                fileNameMap.temporaryFileName.MoveTo(fileNameMap.destinationFile);
+                                            AddProgress(1, targetDirectoryInfo.directory.FullName);
+                                        }
+
+                                        foreach (var fileNameMap in fileNameMaps)
+                                        {
+                                            if (fileNameMap.isMonochromeImage)
+                                                monochromeImageFiles.Add(fileNameMap.destinationFile);
+                                            else
+                                                nonMonochromeImageFiles.Add((fileNameMap.destinationFile, fileNameMap.lastWriteTime, fileNameMap.lastAccessTime, fileNameMap.creationTime));
+                                            AddProgress(1, targetDirectoryInfo.directory.FullName);
+                                        }
+                                    }
+                                    else
+                                    {
+                                        foreach (var fileInfo in fileInfos)
+                                        {
+                                            if (fileInfo.isMonochromeImage)
+                                                monochromeImageFiles.Add(fileInfo.imageFile);
+                                            else
+                                                nonMonochromeImageFiles.Add((fileInfo.imageFile, fileInfo.lastWriteTime, fileInfo.lastAccessTime, fileInfo.creationTime));
+                                            AddProgress(3, targetDirectoryInfo.directory.FullName);
+                                        }
                                     }
                                 }
                             }
+
+                            if (resetMonochromeImageTimestamp)
+                            {
+                                var minimumLastWriteTime = DateTime.MaxValue;
+                                var minimumLastAccessTime = DateTime.MaxValue;
+                                var minimumCreationTime = DateTime.MaxValue;
+                                foreach (var (file, lastWriteTime, lastAccessTime, creationTime) in nonMonochromeImageFiles)
+                                {
+                                    minimumLastWriteTime = Minimum(minimumLastWriteTime, lastWriteTime);
+                                    minimumLastAccessTime = Minimum(minimumLastAccessTime, lastAccessTime);
+                                    minimumCreationTime = Minimum(minimumCreationTime, lastWriteTime);
+                                }
+
+                                foreach (var monochromeImageFile in monochromeImageFiles)
+                                {
+                                    if (minimumLastWriteTime != DateTime.MaxValue)
+                                        monochromeImageFile.LastWriteTimeUtc = minimumLastWriteTime;
+                                    if (minimumLastAccessTime != DateTime.MaxValue)
+                                        monochromeImageFile.LastAccessTimeUtc = minimumLastAccessTime;
+                                    if (minimumCreationTime != DateTime.MaxValue)
+                                        monochromeImageFile.CreationTimeUtc = minimumCreationTime;
+                                    AddProgress(1, targetDirectoryInfo.directory.FullName);
+                                }
+
+                                foreach (var (file, lastWriteTime, lastAccessTime, creationTime) in nonMonochromeImageFiles)
+                                {
+                                    file.LastWriteTimeUtc = lastWriteTime;
+                                    file.LastAccessTimeUtc = lastAccessTime;
+                                    file.CreationTimeUtc = creationTime;
+                                    AddProgress(1, targetDirectoryInfo.directory.FullName);
+                                }
+                            }
+                            else
+                            {
+                                AddProgress(monochromeImageFiles.Count + nonMonochromeImageFiles.Count, targetDirectoryInfo.directory.FullName);
+                            }
                         }
-
-                        if (resetMonochromeImageTimestamp)
+                        catch (Exception ex)
                         {
-                            var minimumLastWriteTime = DateTime.MaxValue;
-                            var minimumLastAccessTime = DateTime.MaxValue;
-                            var minimumCreationTime = DateTime.MaxValue;
-                            foreach (var (file, lastWriteTime, lastAccessTime, creationTime) in nonMonochromeImageFiles)
-                            {
-                                minimumLastWriteTime = Minimum(minimumLastWriteTime, lastWriteTime);
-                                minimumLastAccessTime = Minimum(minimumLastAccessTime, lastAccessTime);
-                                minimumCreationTime = Minimum(minimumCreationTime, lastWriteTime);
-                            }
-
-                            foreach (var monochromeImageFile in monochromeImageFiles)
-                            {
-                                if (minimumLastWriteTime != DateTime.MaxValue)
-                                    monochromeImageFile.LastWriteTimeUtc = minimumLastWriteTime;
-                                if (minimumLastAccessTime != DateTime.MaxValue)
-                                    monochromeImageFile.LastAccessTimeUtc = minimumLastAccessTime;
-                                if (minimumCreationTime != DateTime.MaxValue)
-                                    monochromeImageFile.CreationTimeUtc = minimumCreationTime;
-                                AddProgress(1, targetDirectoryInfo.directory.FullName);
-                            }
-
-                            foreach (var (file, lastWriteTime, lastAccessTime, creationTime) in nonMonochromeImageFiles)
-                            {
-                                file.LastWriteTimeUtc = lastWriteTime;
-                                file.LastAccessTimeUtc = lastAccessTime;
-                                file.CreationTimeUtc = creationTime;
-                                AddProgress(1, targetDirectoryInfo.directory.FullName);
-                            }
-                        }
-                        else
-                        {
-                            AddProgress(monochromeImageFiles.Count + nonMonochromeImageFiles.Count, targetDirectoryInfo.directory.FullName);
+                            ReportException(ex);
                         }
                     }
                 }
@@ -406,10 +414,17 @@ namespace SimpleFileNameRenumberer.CUI
 
         private static (bool isWide, bool isMonochrome) CheckImage(FilePath imageFile)
         {
-            if (string.Equals(imageFile.Extension, ".avif", StringComparison.OrdinalIgnoreCase))
-                return CheckImageForAvif(imageFile);
-            else
-                return CheckImageForGenericImage(imageFile);
+            try
+            {
+                if (string.Equals(imageFile.Extension, ".avif", StringComparison.OrdinalIgnoreCase))
+                    return CheckImageForAvif(imageFile);
+                else
+                    return CheckImageForGenericImage(imageFile);
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"画像の読み込みに失敗しました。: \"{imageFile.FullName}\"", ex);
+            }
         }
 
         private static (bool isWide, bool isMonochrome) CheckImageForGenericImage(FilePath imageFile)
@@ -494,7 +509,7 @@ namespace SimpleFileNameRenumberer.CUI
                 var buffer = new char[1024];
                 while (true)
                 {
-                    var length  = reader.Read(buffer, 0, buffer.Length);
+                    var length = reader.Read(buffer, 0, buffer.Length);
                     if (length <= 0)
                         break;
                     writer.Write(buffer, 0, length);
