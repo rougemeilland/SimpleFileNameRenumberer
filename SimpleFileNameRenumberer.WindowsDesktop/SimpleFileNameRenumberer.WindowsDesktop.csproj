@@ -6,12 +6,13 @@
     <Nullable>enable</Nullable>
     <UseWindowsForms>False</UseWindowsForms>
     <ImplicitUsings>disable</ImplicitUsings>
-    <PublishAot>True</PublishAot>
+    <PublishAot>False</PublishAot>
     <Trimming>full</Trimming>
     <AssemblyName>filerenum.desktop</AssemblyName>
     <EnforceCodeStyleInBuild>True</EnforceCodeStyleInBuild>
     <TieredCompilationQuickJit>false</TieredCompilationQuickJit>
     <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
+    <PublishTrimmed>True</PublishTrimmed>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Debug|net8.0-windows|AnyCPU'">
@@ -35,7 +36,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Palmtree.Application" Version="1.3.16-alpha" />
+    <PackageReference Include="Palmtree.Application" Version="1.4.1-alpha" />
   </ItemGroup>
 
 </Project>
