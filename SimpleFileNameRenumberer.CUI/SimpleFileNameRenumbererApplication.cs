@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
@@ -190,6 +191,7 @@ namespace SimpleFileNameRenumberer.CUI
                                         throw new OperationCanceledException();
                                     nonMonochromeImageFiles.Add((file, file.LastWriteTimeUtc, Minimum(file.LastAccessTimeUtc, file.LastWriteTimeUtc), Minimum(file.CreationTimeUtc, file.LastWriteTimeUtc)));
                                 }
+
                                 AddProgress(targetDirectoryInfo.imageFiles.Count * 4, targetDirectoryInfo.directory.FullName);
                             }
                             else if (targetDirectoryInfo.imageFiles.Count < 2)
@@ -201,6 +203,7 @@ namespace SimpleFileNameRenumberer.CUI
                                         throw new OperationCanceledException();
                                     nonMonochromeImageFiles.Add((file, file.LastWriteTimeUtc, Minimum(file.LastAccessTimeUtc, file.LastWriteTimeUtc), Minimum(file.CreationTimeUtc, file.LastWriteTimeUtc)));
                                 }
+
                                 AddProgress(targetDirectoryInfo.imageFiles.Count * 4, targetDirectoryInfo.directory.FullName);
                             }
                             else
@@ -253,7 +256,7 @@ namespace SimpleFileNameRenumberer.CUI
                                     {
                                         var temporaryPrefix = GetTemporaryFilePrefix(imageFileDirectory);
                                         var totalPageCount = fileInfos.Sum(item => item.isWideImage ? 2 : 1);
-                                        var numberWidth = totalPageCount.ToString().Length;
+                                        var numberWidth = totalPageCount.ToString(CultureInfo.InvariantCulture.NumberFormat).Length;
                                         var numberFormat = $"D{numberWidth}";
                                         var pageCount = 1;
 
@@ -266,7 +269,7 @@ namespace SimpleFileNameRenumberer.CUI
                                                     throw new OperationCanceledException();
                                                 var isFirstPage = pageCount == 1;
                                                 var isWideImage = !isFirstPage && fileInfo.isWideImage;
-                                                var destinationPageNumber = isWideImage ? $"{pageCount.ToString(numberFormat)}-{(pageCount + 1).ToString(numberFormat)}" : pageCount.ToString(numberFormat);
+                                                var destinationPageNumber = isWideImage ? $"{pageCount.ToString(numberFormat, CultureInfo.InvariantCulture.NumberFormat)}-{(pageCount + 1).ToString(numberFormat, CultureInfo.InvariantCulture.NumberFormat)}" : pageCount.ToString(numberFormat, CultureInfo.InvariantCulture.NumberFormat);
                                                 pageCount += isWideImage ? 2 : 1;
                                                 var extension = fileInfo.imageFile.Extension;
                                                 var destinationFile = imageFileDirectory.GetFile($"{prefix ?? ""}{destinationPageNumber}{extension}");
@@ -473,7 +476,7 @@ namespace SimpleFileNameRenumberer.CUI
                 var startInfo = new ProcessStartInfo
                 {
                     FileName = _ffmpegCommandPath.FullName,
-                    Arguments = $"-hide_banner -y -i {imageFile.Name.CommandLineArgumentEncode()} -map 0:v:0 -frames:v:0 1 -update 1 {destinationImageFile.Name.CommandLineArgumentEncode()}",
+                    Arguments = $"-hide_banner -y -i {imageFile.Name.EncodeCommandLineArgument()} -map 0:v:0 -frames:v:0 1 -update 1 {destinationImageFile.Name.EncodeCommandLineArgument()}",
                     WorkingDirectory = baseDirectory.FullName,
                     CreateNoWindow = true,
                     UseShellExecute = false,
