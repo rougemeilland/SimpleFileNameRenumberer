@@ -12,36 +12,29 @@
     <TieredCompilationQuickJit>false</TieredCompilationQuickJit>
     <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
     <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
-  </PropertyGroup>
-
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
     <TreatWarningsAsErrors>True</TreatWarningsAsErrors>
   </PropertyGroup>
 
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
-    <TreatWarningsAsErrors>True</TreatWarningsAsErrors>
+  <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Debug|net9.0|AnyCPU'">
+    <WarningsNotAsErrors>IL3000</WarningsNotAsErrors>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Debug|net8.0|AnyCPU'">
-    <NoWarn>1701;1702;IDE0290</NoWarn>
+    <WarningsNotAsErrors>IL3000</WarningsNotAsErrors>
   </PropertyGroup>
 
-  <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Debug|net7.0|AnyCPU'">
-    <NoWarn>1701;1702;IDE0290</NoWarn>
+  <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Release|net9.0|AnyCPU'">
+    <WarningsNotAsErrors>IL3000</WarningsNotAsErrors>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Release|net8.0|AnyCPU'">
-    <NoWarn>1701;1702;IDE0290</NoWarn>
-  </PropertyGroup>
-
-  <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Release|net7.0|AnyCPU'">
-    <NoWarn>1701;1702;IDE0290</NoWarn>
+    <WarningsNotAsErrors>IL3000</WarningsNotAsErrors>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Palmtree.Application" Version="1.6.10-alpha" />
-    <PackageReference Include="Palmtree.Core" Version="1.17.1-alpha" />
-    <PackageReference Include="Palmtree.IO.Console" Version="1.6.0-alpha" />
+    <PackageReference Include="Palmtree.Application" Version="1.6.13-alpha" />
+    <PackageReference Include="Palmtree.Core" Version="1.19.0-alpha" />
+    <PackageReference Include="Palmtree.IO.Console" Version="1.7.1-alpha" />
     <PackageReference Include="System.Drawing.Common" Version="10.0.0-preview.5.25277.114" />
   </ItemGroup>
 

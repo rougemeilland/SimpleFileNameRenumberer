@@ -426,7 +426,7 @@ namespace SimpleFileNameRenumberer.CUI
             }
             catch (Exception ex)
             {
-                throw new Exception($"画像の読み込みに失敗しました。: \"{imageFile.FullName}\"", ex);
+                throw new ApplicationException($"画像の読み込みに失敗しました。: \"{imageFile.FullName}\"", ex);
             }
         }
 
@@ -444,7 +444,7 @@ namespace SimpleFileNameRenumberer.CUI
             }
             catch (Exception ex)
             {
-                throw new Exception($"画像ではないファイルが含まれています。: \"{imageFile.FullName}\"", ex);
+                throw new ApplicationException($"画像ではないファイルが含まれています。: \"{imageFile.FullName}\"", ex);
             }
         }
 
@@ -468,10 +468,10 @@ namespace SimpleFileNameRenumberer.CUI
                     }
                 }
 
-                Validation.Assert(destinationImageFile is not null, "destinationImageFile is not null");
+                Validation.Assert(destinationImageFile is not null);
 
                 if (_ffmpegCommandPath is null)
-                    throw new Exception("AVIF ファイルをサポートするためには ffmpeg がインストールされている必要があります。");
+                    throw new ApplicationException("AVIF ファイルをサポートするためには ffmpeg がインストールされている必要があります。");
 
                 var startInfo = new ProcessStartInfo
                 {
@@ -490,7 +490,7 @@ namespace SimpleFileNameRenumberer.CUI
 
                 var process =
                     Process.Start(startInfo)
-                    ?? throw new Exception("ffmpeg の実行に失敗しました。");
+                    ?? throw new ApplicationException("ffmpeg の実行に失敗しました。");
 
                 _ = Task.Run(() => CopyTextStream(TextReader.Null, process.StandardInput));
                 var standardOutputHandler = Task.Run(() => CopyTextStream(process.StandardOutput, TextWriter.Null));
@@ -498,7 +498,7 @@ namespace SimpleFileNameRenumberer.CUI
                 Task.WaitAll(standardOutputHandler, standardErrorHandler);
                 process.WaitForExit();
                 if (process.ExitCode != 0)
-                    throw new Exception($"ffmpeg が異常終了しました。: exitCode={process.ExitCode}, command=\"{startInfo.FileName} {startInfo.Arguments}\"");
+                    throw new ApplicationException($"ffmpeg が異常終了しました。: exitCode={process.ExitCode}, command=\"{startInfo.FileName} {startInfo.Arguments}\"");
 
                 return CheckImageForGenericImage(destinationImageFile);
             }
@@ -623,10 +623,13 @@ namespace SimpleFileNameRenumberer.CUI
 
             [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
             static unsafe uint GetPixel(byte* p)
-                => ((uint)p[0] << (8 * 0))
+            {
+                return
+                    ((uint)p[0] << (8 * 0))
                     | ((uint)p[1] << (8 * 1))
                     | ((uint)p[2] << (8 * 2))
                     | ((uint)p[3] << (8 * 3));
+            }
         }
 
         private bool ExistDuplicateFileNames(DirectoryPath? baseDirectory, IEnumerable<string> fileNames)

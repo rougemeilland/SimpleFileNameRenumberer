@@ -10,7 +10,6 @@ namespace SimpleFileNameRenumberer.WindowsDesktop
         [STAThread]
         private static void Main(string[] args)
         {
-            TinyConsole.DefaultTextWriter = ConsoleTextWriterType.StandardError;
             var launcher = new ConsoleApplicationLauncher("filerenum", Encoding.UTF8);
             launcher.Launch(args);
         }
