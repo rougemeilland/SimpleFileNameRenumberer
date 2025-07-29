@@ -7,7 +7,6 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
 using Palmtree;
@@ -541,7 +540,8 @@ namespace SimpleFileNameRenumberer.CUI
             var bitmapData =
                 image.LockBits(
                     new Rectangle(0, 0, image.Width, image.Height),
-                    ImageLockMode.ReadOnly, pixelFormat);
+                    ImageLockMode.ReadOnly,
+                    pixelFormat);
             try
             {
                 var stride = Math.Abs(bitmapData.Stride);
@@ -552,83 +552,24 @@ namespace SimpleFileNameRenumberer.CUI
                     return true;
                 }
 
-                var imageBytes = new byte[imageBytesLength];
-                Marshal.Copy(bitmapData.Scan0, imageBytes, 0, imageBytes.Length);
-                var columnLength = bitmapData.Width * sizeOfPixel;
+                Validation.Assert(imageBytesLength == image.Width * image.Height * 4);
+                Validation.Assert(sizeof(uint) == 4);
+
+                // stride はスキャンラインのバイト数を 4 の倍数に切り上げたものであるが、sizeOfPixel は 4 であるので、stride == sizeOfPixel * image.Width が成立するはず。
+                // つまり、スキャンラインの末尾に余分な空白バイト列は存在しない。
+                Validation.Assert(stride == sizeOfPixel * image.Width);
+
                 unsafe
                 {
-                    fixed (byte* imageBytesTop = imageBytes)
-                    {
-                        var endOfBytes = imageBytesTop + imageBytes.Length;
-                        if (stride == sizeOfPixel * image.Width)
-                        {
-                            // 1 行の右端までピクセルデータがみっしりと詰まっている場合
-
-                            if (sizeOfPixel == sizeof(uint) && (unchecked((int)imageBytesTop) & (sizeof(uint) - 1)) == 0)
-                            {
-                                // ポインタ imageBytesTop が uint のアラインメント境界上にある場合
-                                // (おそらく大半がこのルートに到達する)
-
-                                // imageBytesTop から始まるデータを uint の配列として扱う
-                                var ptr = (uint*)imageBytesTop;
-                                var samplePixel = *ptr++;
-                                while (ptr < endOfBytes)
-                                {
-                                    if (*ptr++ != samplePixel)
-                                        return false;
-                                }
-                            }
-                            else
-                            {
-                                // ポインタ imageBytesTop が uint のアラインメント境界上にない場合
-
-                                var samplePixel = GetPixel(imageBytesTop);
-                                for (var p = imageBytesTop + sizeOfPixel; p < endOfBytes; p += sizeOfPixel)
-                                {
-                                    if (GetPixel(p) != samplePixel)
-                                        return false;
-                                }
-                            }
-                        }
-                        else
-                        {
-                            // 1 行の右端に余白がある場合
-                            // (1 ピクセルが 4 バイトであり、かつ .NET の仕様上 stride は 4 の倍数なので、このルートに到達することはほぼない)
-
-                            var samplePixel = GetPixel(imageBytesTop);
-                            var row = imageBytesTop;
-                            while (row < endOfBytes)
-                            {
-                                var endOfColumn = row + columnLength;
-                                var column = row;
-                                while (column < endOfColumn)
-                                {
-                                    if (GetPixel(column) != samplePixel)
-                                        return false;
-                                    column += sizeOfPixel;
-                                }
-
-                                row += stride;
-                            }
-                        }
-
-                        return true;
-                    }
+                    //if((UIntPtr)bitmapData.Scan0 % sizeof(uint) == 0)
+                    //    return BitmapOperation.IsMonochromeImageAligned((uint*)bitmapData.Scan0, (uint)imageBytesLength / sizeof(uint));
+                    //else
+                        return BitmapOperation.IsMonochromeImage((byte*)bitmapData.Scan0, (uint)imageBytesLength / sizeof(uint));
                 }
             }
             finally
             {
                 image.UnlockBits(bitmapData);
-            }
-
-            [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-            static unsafe uint GetPixel(byte* p)
-            {
-                return
-                    ((uint)p[0] << (8 * 0))
-                    | ((uint)p[1] << (8 * 1))
-                    | ((uint)p[2] << (8 * 2))
-                    | ((uint)p[3] << (8 * 3));
             }
         }
 
