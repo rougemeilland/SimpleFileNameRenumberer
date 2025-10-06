@@ -222,14 +222,14 @@ namespace SimpleFileNameRenumberer.CUI
                                                 throw new OperationCanceledException();
                                             if (onlyImageFile)
                                             {
-                                                var (isWideImage, isMonochromeImage) = CheckImage(imageFile);
+                                                var (isLandscape, isMonochromeImage) = CheckImage(imageFile);
                                                 var value = new
                                                 {
                                                     imageFile,
                                                     lastWriteTime = imageFile.LastWriteTimeUtc,
                                                     lastAccessTime = Minimum(imageFile.LastAccessTimeUtc, imageFile.LastWriteTimeUtc),
                                                     creationTime = Minimum(imageFile.CreationTimeUtc, imageFile.LastWriteTimeUtc),
-                                                    isWideImage,
+                                                    isLandscape,
                                                     isMonochromeImage,
                                                 };
                                                 AddProgress(1, targetDirectoryInfo.directory.FullName);
@@ -243,7 +243,7 @@ namespace SimpleFileNameRenumberer.CUI
                                                     lastWriteTime = imageFile.LastWriteTimeUtc,
                                                     lastAccessTime = Minimum(imageFile.LastAccessTimeUtc, imageFile.LastWriteTimeUtc),
                                                     creationTime = Minimum(imageFile.CreationTimeUtc, imageFile.LastWriteTimeUtc),
-                                                    isWideImage = false,
+                                                    isLandscape = false,
                                                     isMonochromeImage = false,
                                                 };
                                                 AddProgress(1, targetDirectoryInfo.directory.FullName);
@@ -254,7 +254,7 @@ namespace SimpleFileNameRenumberer.CUI
                                     if (targetDirectoryInfo.isEnabledImageDirectory)
                                     {
                                         var temporaryPrefix = GetTemporaryFilePrefix(imageFileDirectory);
-                                        var totalPageCount = fileInfos.Sum(item => item.isWideImage ? 2 : 1);
+                                        var totalPageCount = fileInfos.Sum(item => item.isLandscape ? 2 : 1);
                                         var numberWidth = totalPageCount.ToString(CultureInfo.InvariantCulture.NumberFormat).Length;
                                         var numberFormat = $"D{numberWidth}";
                                         var pageCount = 1;
@@ -267,13 +267,13 @@ namespace SimpleFileNameRenumberer.CUI
                                                 if (IsPressedBreak)
                                                     throw new OperationCanceledException();
                                                 var isFirstPage = pageCount == 1;
-                                                var isWideImage = !isFirstPage && fileInfo.isWideImage;
-                                                var destinationPageNumber = isWideImage ? $"{pageCount.ToString(numberFormat, CultureInfo.InvariantCulture.NumberFormat)}-{(pageCount + 1).ToString(numberFormat, CultureInfo.InvariantCulture.NumberFormat)}" : pageCount.ToString(numberFormat, CultureInfo.InvariantCulture.NumberFormat);
-                                                pageCount += isWideImage ? 2 : 1;
+                                                var isLandscape = !isFirstPage && fileInfo.isLandscape;
+                                                var destinationPageNumber = isLandscape ? $"{pageCount.ToString(numberFormat, CultureInfo.InvariantCulture.NumberFormat)}-{(pageCount + 1).ToString(numberFormat, CultureInfo.InvariantCulture.NumberFormat)}" : pageCount.ToString(numberFormat, CultureInfo.InvariantCulture.NumberFormat);
+                                                pageCount += isLandscape ? 2 : 1;
                                                 var extension = fileInfo.imageFile.Extension;
                                                 var destinationFile = imageFileDirectory.GetFile($"{prefix ?? ""}{destinationPageNumber}{extension}");
 
-                                                if ((pageCount & 1) != 0 && isWideImage)
+                                                if ((pageCount & 1) != 0 && isLandscape)
                                                     ReportWarningMessage($"見開きページが偶数ページ番号ではありません。: page=\"{destinationPageNumber}\", file=\"{destinationFile.FullName}\"");
 
                                                 return new
@@ -414,7 +414,7 @@ namespace SimpleFileNameRenumberer.CUI
             return true;
         }
 
-        private static (bool isWide, bool isMonochrome) CheckImage(FilePath imageFile)
+        private static (bool isLandscape, bool isMonochrome) CheckImage(FilePath imageFile)
         {
             try
             {
@@ -437,9 +437,9 @@ namespace SimpleFileNameRenumberer.CUI
             try
             {
                 using var image = new Bitmap(imageFile.FullName);
-                var isWide = CheckIfWideImage(image);
+                var isLandscape = IsLandscape(image);
                 var isMonochrome = CheckIfMonochromeImage(image);
-                return (isWide, isMonochrome);
+                return (isLandscape, isMonochrome);
             }
             catch (Exception ex)
             {
@@ -447,7 +447,7 @@ namespace SimpleFileNameRenumberer.CUI
             }
         }
 
-        private static (bool isWide, bool isMonochrome) CheckImageForAvif(FilePath imageFile)
+        private static (bool isLandscape, bool isMonochrome) CheckImageForAvif(FilePath imageFile)
         {
             var baseDirectory = imageFile.Directory;
             var destinationImageFile = (FilePath?)null;
@@ -519,12 +519,15 @@ namespace SimpleFileNameRenumberer.CUI
             }
         }
 
-        private static bool CheckIfWideImage(Bitmap image)
+        private static bool IsLandscape(Bitmap image)
         {
             if (!OperatingSystem.IsWindowsVersionAtLeast(6, 1))
                 throw new NotSupportedException();
 
-            return image.Width * 6 > image.Height * 5;
+            // 横長画像かどうかの判断は NeeView 準拠
+            //   https://github.com/neelabo/NeeView/blob/a2675a1d6f82d91bbdaa065ea293b1a3f26ad334/NeeView/PageFramesMath/AspectRatioTools.cs#L24
+            //   wideRatio (アスペクト比) の値は環境設定ファイルに 1 として記述されており、通常は変更できない模様。
+            return image.Width > image.Height;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveOptimization)]
